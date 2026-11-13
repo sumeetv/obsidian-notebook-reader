@@ -1,0 +1,172 @@
+<div id="notebook-directions" class="viz-carousel viz-dotted-background" aria-label="Five vault reading directions">
+  <section data-variant="Thumb-edge notebook" aria-label="Thumb-edge notebook"><div class="nb-product" data-design="book"></div></section>
+  <section data-variant="Indexed folio" aria-label="Indexed folio" hidden><div class="nb-product" data-design="index"></div></section>
+  <section data-variant="Page atlas" aria-label="Page atlas" hidden><div class="nb-product" data-design="atlas"></div></section>
+  <section data-variant="Two-place desk" aria-label="Two-place desk" hidden><div class="nb-product" data-design="desk"></div></section>
+  <section data-variant="Wandering notebook" aria-label="Wandering notebook" hidden><div class="nb-product" data-design="trail"></div></section>
+</div>
+<style>
+#notebook-directions .nb-product {
+ --nb-paper:light-dark(#faf7ef,#262622); --nb-ink:light-dark(#2d332e,#e5e5db);
+ --nb-soft:light-dark(#eae9df,#30332d); --nb-line:light-dark(#d5d8cb,#50564a);
+ --nb-dim:light-dark(#5f695f,#b2baab); --nb-accent:light-dark(#456443,#b3cc9c);
+ --nb-tint:light-dark(#e2e9d9,#374631); --nb-chrome:light-dark(#f0f0e9,#20231f);
+ color:var(--nb-ink); background:var(--nb-paper); border:1px solid var(--nb-line); border-radius:16px;
+ font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; min-height:760px;
+ overflow-wrap:anywhere; box-sizing:border-box; display:flex;flex-direction:column;
+}
+#notebook-directions .nb-product *{box-sizing:border-box}
+#notebook-directions .nb-product button,#notebook-directions .nb-product select {font:inherit;color:inherit;cursor:pointer}
+#notebook-directions .nb-product button{border:1px solid var(--nb-line);background:var(--nb-paper);padding:8px 12px;border-radius:8px;min-height:40px;text-align:left}
+#notebook-directions .nb-product button:hover{background:var(--nb-tint)}
+#notebook-directions .nb-product button[aria-pressed="true"]{background:var(--nb-tint);border-color:var(--nb-accent)}
+#notebook-directions .nb-product button:disabled{opacity:.4;cursor:default}
+#notebook-directions .nb-product select{border:1px solid var(--nb-line);background:var(--nb-paper);padding:8px;border-radius:7px;max-width:100%;min-height:40px}
+#notebook-directions .nb-product input{accent-color:var(--nb-accent)}
+#notebook-directions .nb-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:16px 110px 12px 20px;background:var(--nb-chrome);border-radius:16px 16px 0 0}
+#notebook-directions .nb-brand{font-family:Georgia,serif;font-size:21px;letter-spacing:-.4px}
+#notebook-directions .nb-demo{font-size:12px;color:var(--nb-dim)}
+#notebook-directions .nb-options{display:flex;gap:10px 18px;align-items:center;flex-wrap:wrap;padding:12px 20px;border-bottom:1px solid var(--nb-line)}
+#notebook-directions .nb-options label{display:flex;align-items:center;gap:8px}
+#notebook-directions .nb-options input{width:18px;height:18px}
+#notebook-directions .nb-body{padding:20px;flex:1;display:flex;flex-direction:column;gap:16px}
+#notebook-directions .nb-reading{display:grid;grid-template-columns:minmax(0,1fr) 112px;gap:24px;flex:1}
+#notebook-directions .nb-page{padding:12px 12px 20px;min-width:0;position:relative;touch-action:pan-y}
+#notebook-directions .nb-eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--nb-dim);margin-bottom:16px}
+#notebook-directions .nb-page h2{font:400 29px/1.15 Georgia,serif;letter-spacing:-.6px;margin:0 0 22px}
+#notebook-directions .nb-page h3{font:400 20px/1.3 Georgia,serif;margin:24px 0 12px}
+#notebook-directions .nb-page p{font:400 17px/1.8 var(--nb-reading-font,Georgia,serif);margin:0 0 18px;max-width:54ch}
+#notebook-directions .nb-page blockquote{margin:24px 0;padding:0 0 0 16px;border-left:2px solid var(--nb-accent);font:italic 18px/1.65 Georgia,serif}
+#notebook-directions .nb-page .nb-meta{font:12px/1.5 -apple-system,sans-serif;color:var(--nb-dim);margin-top:24px}
+#notebook-directions .nb-page .nb-link{color:var(--nb-accent);text-decoration:underline;border:0;background:none;padding:0;min-height:44px}
+#notebook-directions .nb-divider{display:flex;align-items:center;gap:12px;color:var(--nb-dim);font-size:12px;text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px}
+#notebook-directions .nb-divider:after{content:"";height:1px;background:var(--nb-line);flex:1}
+#notebook-directions .nb-edge{border-left:1px solid var(--nb-line);display:flex;flex-direction:column;gap:10px;position:relative;padding-left:10px;background:repeating-linear-gradient(90deg,transparent 0,transparent 3px,var(--nb-line) 3px,var(--nb-line) 4px);background-size:14px 100%;background-repeat:no-repeat}
+#notebook-directions .nb-edge button{position:relative;margin-left:7px;font-size:12px;background:var(--nb-chrome)}
+#notebook-directions .nb-edge .nb-marker{background:var(--nb-accent);color:var(--nb-paper);border-color:var(--nb-accent)}
+#notebook-directions .nb-rail-label{font-size:12px;color:var(--nb-dim);background:var(--nb-paper);margin:0 0 0 7px}
+#notebook-directions .nb-scrub{display:flex;flex-direction:column;gap:6px;padding-top:10px;border-top:1px solid var(--nb-line)}
+#notebook-directions .nb-scrub label{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--nb-dim)}
+#notebook-directions .nb-scrub input{width:100%;min-height:35px;margin:0;cursor:ew-resize}
+#notebook-directions .nb-actions{display:flex;gap:8px;flex-wrap:wrap;padding:14px 20px;background:var(--nb-chrome);border-top:1px solid var(--nb-line);border-radius:0 0 16px 16px}
+#notebook-directions .nb-actions .nb-primary{background:var(--nb-tint);border-color:var(--nb-accent)}
+#notebook-directions .nb-held{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--nb-dim);border-top:1px solid var(--nb-line);padding-top:12px}
+#notebook-directions .nb-held span{max-width:100%}
+#notebook-directions .nb-index-layout{display:grid;grid-template-columns:minmax(0,1fr) 210px;gap:20px}
+#notebook-directions .nb-index{display:flex;flex-direction:column;gap:6px;border-left:1px solid var(--nb-line);padding-left:14px;min-width:0}
+#notebook-directions .nb-index .nb-index-title{font-size:12px;color:var(--nb-dim);margin:12px 0 4px}
+#notebook-directions .nb-index button{border:0;background:none;padding:7px 9px;font-size:12px}
+#notebook-directions .nb-index button span{display:block;font-size:11px;color:var(--nb-dim)}
+#notebook-directions .nb-atlas{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+#notebook-directions .nb-atlas .nb-divider{grid-column:1/-1;margin-top:10px}
+#notebook-directions .nb-thumb{min-height:142px;display:flex;flex-direction:column;gap:10px;box-shadow:3px 3px 0 var(--nb-soft);border-radius:2px}
+#notebook-directions .nb-thumb strong{font:400 17px/1.3 Georgia,serif}
+#notebook-directions .nb-thumb small{font:12px/1.5 Georgia,serif;color:var(--nb-dim)}
+#notebook-directions .nb-thumb .nb-caption{font:11px/1.4 -apple-system,sans-serif;margin-top:auto;color:var(--nb-dim)}
+#notebook-directions .nb-dual{display:grid;grid-template-columns:1fr 1fr;gap:24px;flex:1}
+#notebook-directions .nb-dual>div+div{border-left:1px solid var(--nb-line);padding-left:20px}
+#notebook-directions .nb-dual .nb-page{padding:4px 0}
+#notebook-directions .nb-dual .nb-page h2{font-size:25px}
+#notebook-directions .nb-dual .nb-page p{font-size:16px}
+#notebook-directions .nb-pane-title{font-size:12px;color:var(--nb-dim);display:flex;justify-content:space-between;gap:8px;margin-bottom:20px}
+#notebook-directions .nb-trail{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding-bottom:14px;border-bottom:1px solid var(--nb-line)}
+#notebook-directions .nb-trail button{font-size:12px}
+#notebook-directions .nb-trail .nb-arrow{color:var(--nb-dim)}
+#notebook-directions .nb-links{display:flex;gap:10px;flex-wrap:wrap}
+#notebook-directions .nb-links button{flex:1;min-width:140px}
+#notebook-directions .nb-section-pick{display:flex;gap:7px;flex-wrap:wrap}
+#notebook-directions .nb-section-pick button{font-size:12px}
+@media(max-width:560px){
+ #notebook-directions .nb-product{min-height:1000px}
+ #notebook-directions .nb-top{padding-left:14px}
+ #notebook-directions .nb-body{padding:14px}
+ #notebook-directions .nb-options{padding:10px 14px}
+ #notebook-directions .nb-reading{grid-template-columns:minmax(0,1fr) 82px;gap:10px}
+ #notebook-directions .nb-page{padding:8px 0}
+ #notebook-directions .nb-page h2{font-size:26px}
+ #notebook-directions .nb-page p{font-size:16px}
+ #notebook-directions .nb-edge{padding-left:4px}
+ #notebook-directions .nb-edge button{padding:8px 5px;margin-left:6px}
+ #notebook-directions .nb-index-layout{grid-template-columns:1fr}
+ #notebook-directions .nb-index{border-left:0;border-top:1px solid var(--nb-line);padding:12px 0 0;display:grid;grid-template-columns:1fr 1fr;gap:4px}
+ #notebook-directions .nb-index-title{grid-column:1/-1}
+ #notebook-directions .nb-atlas{grid-template-columns:1fr 1fr}
+ #notebook-directions .nb-dual{grid-template-columns:1fr;gap:20px}
+ #notebook-directions .nb-dual>div+div{border-left:0;padding:20px 0 0;border-top:1px solid var(--nb-line)}
+ #notebook-directions .nb-dual .nb-page p{font-size:15px}
+ #notebook-directions .nb-actions{padding:12px 14px}
+ #notebook-directions .nb-product button{min-height:44px}
+}
+@media(prefers-reduced-motion:no-preference){#notebook-directions .nb-page{animation:nb-enter .18s ease-out}@keyframes nb-enter{from{transform:translateX(5px)}to{transform:translateX(0)}}}
+</style>
+<script>
+(() => {
+ const root=document.getElementById('notebook-directions');
+ const notes=[
+ {id:'attention',folder:'Ideas',title:'Attention is a material',date:'2026-10-12',pages:[['What we notice shapes what we can make. Attention is not just a spotlight; it changes the surface it lands on.','A notebook gives an unfinished idea somewhere to wait. Returning to it is a different kind of thinking.'],['A small experiment','Keep one question visible for a week. Notice what starts to attach itself to it.']],links:['constraints','walk']},
+ {id:'constraints',folder:'Ideas',title:'Constraints make room',date:'2026-09-23',pages:[['An empty page has too many possibilities. A small constraint gives the next move a shape.','Try describing an idea using only something you saw on a walk.']],links:['walk','attention']},
+ {id:'slow',folder:'Ideas',title:'Slow knowledge',date:'2026-11-02',pages:[['Some ideas become useful only after we forget where we put them. Rediscovery creates a second context.','What would it mean to design for returning, rather than collecting?']],links:['gardens','attention']},
+ {id:'daily1',folder:'Journal',title:'2026-11-10',date:'2026-11-10',pages:[['A clear morning. Read a few old notes before opening anything new.','The same question appeared in three places: how do we make room for something we cannot plan?']],links:['slow','gardens']},
+ {id:'daily2',folder:'Journal',title:'2026-11-11',date:'2026-11-11',pages:[['Went back to the courtyard. A path forms where people keep walking, even when the plan says otherwise.','Maybe the useful structure is the one we discover after using it.']],links:['gardens','walk']},
+ {id:'gardens',folder:'Reading',title:'Gardens and paths',date:'2026-08-14',pages:[['A garden is organized, but it keeps growing beyond the organization. Paths make it possible to return without fixing every destination.','Notes might need just enough structure to be revisited.'],['Paths of least resistance','The route you take through a collection becomes part of what the collection means.']],links:['slow','walk']},
+ {id:'noticing',folder:'Reading',title:'The art of noticing',date:'2026-10-30',pages:[['Look for what repeats. Then look for the exception.','The value of a page can change depending on the page you read just before it.']],links:['attention','constraints']},
+ {id:'walk',folder:'Walks',title:'Courtyard observations',date:'2026-10-08',pages:[['Moss growing in the gaps between stones. The gaps were probably an afterthought.','There is a kind of usefulness that arrives without being designed.']],links:['gardens','constraints']}
+ ];
+ const lookup=Object.fromEntries(notes.map(n=>[n.id,n]));
+ const defaults=()=>({id:'attention',part:0,held:'gardens',heldPart:0,order:'alpha',journal:false,compare:false,overview:true,trail:['gardens','attention']});
+ const states={};
+ const restored=window.openai?.widgetState?.privateContent?.notebook;
+ function valid(x){const s={...defaults(),...x};if(!lookup[s.id])s.id='attention';if(!lookup[s.held])s.held='gardens';s.part=Math.min(Math.max(Number(s.part)||0,0),lookup[s.id].pages.length-1);s.heldPart=Math.min(Math.max(Number(s.heldPart)||0,0),lookup[s.held].pages.length-1);s.trail=Array.isArray(s.trail)?s.trail.filter(id=>lookup[id]).slice(-4):[s.id];return s;}
+ root.querySelectorAll('[data-design]').forEach(el=>states[el.dataset.design]=valid(restored?.[el.dataset.design]));
+ const style={serif:true};
+ const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ function ordered(s){return notes.filter(n=>s.journal||n.folder!=='Journal').sort((a,b)=>a.folder.localeCompare(b.folder)||(s.order==='alpha'?a.title.localeCompare(b.title):a.date.localeCompare(b.date)));}
+ function leaves(s){return ordered(s).flatMap(n=>n.pages.map((_,part)=>({id:n.id,part})));}
+ function save(design){const modelContent={design,lastNote:lookup[states[design].id].title,heldNote:lookup[states[design].held].title};const p=window.openai?.setWidgetState?.({modelContent,privateContent:{notebook:states}});if(p?.catch)p.catch(()=>{});}
+ function page(id,part=0){const n=lookup[id];return `<article class="nb-page" aria-label="${escape(n.title)}"><div class="nb-eyebrow">${escape(n.folder)} · ${n.date}</div><h2>${escape(n.title)}</h2>${n.pages[part].map((p,i)=>part>0&&i===0?`<h3>${escape(p)}</h3>`:`<p>${escape(p)}</p>`).join('')}<p class="nb-meta">${n.pages.length>1?`Page ${part+1} of ${n.pages.length} · `:''}${escape(n.folder+'/'+n.title+'.md')}</p></article>`;}
+ function btn(label,action,extra=''){return `<button type="button" data-action="${action}" ${extra}>${label}</button>`;}
+ function held(s){return `<div class="nb-held"><span>Ribbon · ${escape(lookup[s.held].title)}${s.heldPart?' · p. '+(s.heldPart+1):''}</span>${btn('Swap places ⇄','swap')}</div>`;}
+ function scrub(s,design){const all=leaves(s),pos=all.findIndex(x=>x.id===s.id&&x.part===s.part);return `<div class="nb-scrub"><label for="nb-range-${design}"><span>Flip through pages</span><span>${pos+1} / ${all.length}</span></label><input id="nb-range-${design}" data-action="scrub" aria-label="Flip through pages" type="range" min="0" max="${all.length-1}" value="${Math.max(0,pos)}"></div>`;}
+ function index(s){let f='';return `<nav class="nb-index" aria-label="Folder sections and notes">${ordered(s).map(n=>{const h=f!==n.folder?`<div class="nb-index-title">${escape(n.folder)}</div>`:'';f=n.folder;return h+btn(`${escape(n.title)}${s.held===n.id?'<span>Ribbon bookmark</span>':''}`,`jump:${n.id}`,`aria-pressed="${s.id===n.id}"`);}).join('')}</nav>`;}
+ function dual(s){return `<div class="nb-dual"><div><div class="nb-pane-title"><span>HELD PLACE · A</span>${btn('Replace with current','hold')}</div>${page(s.held,s.heldPart)}</div><div><div class="nb-pane-title"><span>EXPLORING · B</span><span>← → to browse</span></div>${page(s.id,s.part)}</div></div>`;}
+ function atlas(s){let f='';return `<div class="nb-atlas">${ordered(s).map(n=>{const h=f!==n.folder?`<div class="nb-divider">${escape(n.folder)}</div>`:'';f=n.folder;return h+btn(`<strong>${escape(n.title)}</strong><small>${escape(n.pages[0][0].slice(0,94))}…</small><span class="nb-caption">${n.pages.length} ${n.pages.length===1?'page':'pages'}${s.held===n.id?' · Ribbon bookmark':''}${s.id===n.id?' · Current':''}</span>`,`open:${n.id}`,`class="nb-thumb" aria-pressed="${s.id===n.id}"`);}).join('')}</div>`;}
+ function render(el){
+  const d=el.dataset.design,s=states[d],n=lookup[s.id],all=leaves(s);let pos=all.findIndex(x=>x.id===s.id&&x.part===s.part);
+  if(pos<0){s.id=all[0].id;s.part=0;pos=0;}
+  const folders=[...new Set(ordered(s).map(n=>n.folder))];
+  let main='';
+  if(s.compare||d==='desk')main=dual(s);
+  else if(d==='book')main=`<div class="nb-reading">${page(s.id,s.part)}<nav class="nb-edge" aria-label="Book edge"><span class="nb-rail-label">Sections</span>${folders.map(f=>btn(escape(f),`folder:${f}`,`aria-pressed="${lookup[s.id].folder===f}"`)).join('')}<span class="nb-rail-label">Held place</span>${btn('Ribbon ↩','swap','class="nb-marker"')}<span class="nb-rail-label">${all.length-pos-1} pages ahead</span></nav></div>`;
+  else if(d==='index')main=`<div class="nb-index-layout">${page(s.id,s.part)}${index(s)}</div>`;
+  else if(d==='atlas')main=s.overview?atlas(s):`${btn('▦ All pages','overview')}${page(s.id,s.part)}`;
+  else if(d==='trail')main=`<nav class="nb-trail" aria-label="Reading trail">${s.trail.map((id,i)=>(i?'<span class="nb-arrow" aria-hidden="true">→</span>':'')+btn(escape(lookup[id].title),`jump:${id}`,`aria-pressed="${s.id===id}"`)).join('')}</nav>${page(s.id,s.part)}<div class="nb-divider">Links in this note</div><div class="nb-links">${lookup[s.id].links.filter(id=>s.journal||lookup[id].folder!=='Journal').map(id=>btn(escape(lookup[id].title)+' ↗',`jump:${id}`)).join('')}</div>`;
+  el.innerHTML=`<header class="nb-top"><span class="nb-brand">Fieldnotes</span><span class="nb-demo">Demo vault · reading view</span></header><div class="nb-options"><label>Order <select data-action="order" aria-label="Note order"><option value="alpha" ${s.order==='alpha'?'selected':''}>A–Z within folders</option><option value="chrono" ${s.order==='chrono'?'selected':''}>Oldest first within folders</option></select></label><label><input type="checkbox" data-action="journal" ${s.journal?'checked':''}> Include Journal</label></div><div class="nb-body">${d==='desk'?`<nav class="nb-section-pick" aria-label="Jump to section">${folders.map(f=>btn(escape(f),`folder:${f}`,`aria-pressed="${lookup[s.id].folder===f}"`)).join('')}</nav>`:''}<div class="nb-divider">${d==='atlas'&&s.overview?'Vault overview':escape(lookup[s.id].folder)}</div>${main}${d!=='atlas'||!s.overview?scrub(s,d):''}${held(s)}</div><footer class="nb-actions">${btn('← Previous','prev',pos<=0?'disabled':'')}${btn('Next →','next',pos>=all.length-1?'disabled':'')}${btn('Hold this place','hold')}${d==='desk'?'':btn(s.compare?'Close comparison':'Compare places','compare',`class="nb-primary" aria-pressed="${s.compare}"`)}</footer>`;
+  el.style.setProperty('--nb-reading-font',style.serif?'Georgia,serif':'-apple-system,sans-serif');
+ }
+ function renderAll(){root.querySelectorAll('[data-design]').forEach(render);}
+ function apply(el,action,value){const d=el.dataset.design,s=states[d];
+  const jump=(id)=>{s.id=id;s.part=0;if(d==='trail'&&s.trail.at(-1)!==id)s.trail=[...s.trail,id].slice(-4);};
+  if(action==='next'||action==='prev'){const all=leaves(s),p=all.findIndex(x=>x.id===s.id&&x.part===s.part);Object.assign(s,all[Math.max(0,Math.min(all.length-1,p+(action==='next'?1:-1)))]);s.overview=false;}
+  else if(action==='scrub'){Object.assign(s,leaves(s)[Number(value)]);s.overview=false;}
+  else if(action==='swap'){const id=s.id,part=s.part;s.id=s.held;s.part=s.heldPart;s.held=id;s.heldPart=part;s.overview=false;if(lookup[s.id].folder==='Journal')s.journal=true;}
+  else if(action==='hold'){s.held=s.id;s.heldPart=s.part;}
+  else if(action==='compare')s.compare=!s.compare;
+  else if(action==='overview')s.overview=true;
+  else if(action==='order')s.order=value;
+  else if(action==='journal'){s.journal=value;if(!value&&lookup[s.id].folder==='Journal'){s.id='attention';s.part=0;}}
+  else if(action.startsWith('folder:'))jump(ordered(s).find(n=>n.folder===action.slice(7)).id);
+  else if(action.startsWith('jump:')||action.startsWith('open:')){jump(action.split(':')[1]);if(action.startsWith('open:'))s.overview=false;}
+  render(el);save(d);
+ }
+ root.addEventListener('click',e=>{const b=e.target.closest('button[data-action]');if(b&&!b.disabled)apply(b.closest('[data-design]'),b.dataset.action);});
+ root.addEventListener('change',e=>{if(e.target.type==='range'){const el=e.target.closest('[data-design]');render(el);save(el.dataset.design);}else if(e.target.dataset.action)apply(e.target.closest('[data-design]'),e.target.dataset.action,e.target.type==='checkbox'?e.target.checked:e.target.value);});
+ root.addEventListener('input',e=>{if(e.target.type==='range'){const el=e.target.closest('[data-design]'),s=states[el.dataset.design];Object.assign(s,leaves(s)[Number(e.target.value)]);const label=e.target.previousElementSibling;label.lastElementChild.textContent=`${Number(e.target.value)+1} / ${leaves(s).length}`;const pages=el.querySelectorAll('.nb-page');const p=pages[pages.length-1];if(p){p.outerHTML=page(s.id,s.part);}save(el.dataset.design);}});
+ let swipe=null;
+ root.addEventListener('pointerdown',e=>{if(e.pointerType==='touch'&&e.target.closest('.nb-page')&&!e.target.closest('button'))swipe={x:e.clientX,y:e.clientY,el:e.target.closest('[data-design]')};});
+ root.addEventListener('pointerup',e=>{if(swipe){const dx=e.clientX-swipe.x,dy=e.clientY-swipe.y;if(Math.abs(dx)>65&&Math.abs(dx)>Math.abs(dy)*1.5)apply(swipe.el,dx<0?'next':'prev');swipe=null;}});
+ root.addEventListener('pointercancel',()=>swipe=null);
+ window.addEventListener('openai:set_globals',e=>{const x=e.detail?.globals?.widgetState?.privateContent?.notebook;if(x){Object.keys(states).forEach(d=>states[d]=valid(x[d]));renderAll();}});
+ renderAll();
+ if(globalThis.Tweak){const tweak=new Tweak({container:root,onChange:renderAll});tweak.addToggle(style,'serif',{label:'Serif reading type'});}
+})();
+</script>
