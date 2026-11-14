@@ -355,9 +355,12 @@ export class MockMetadataCache {
 export class MockWorkspace {
   private leaves: WorkspaceLeaf[] = [];
   public openedLinks: Array<{ linktext: string; sourcePath: string }> = [];
+  public openedFiles: Array<{ path: string; leafMode?: boolean | string }> = [];
 
-  getLeaf(): WorkspaceLeaf {
-    const leaf = new WorkspaceLeaf();
+  getLeaf(newLeaf?: boolean | "tab" | "split" | "window"): WorkspaceLeaf {
+    const leaf = new WorkspaceLeaf((file) => {
+      this.openedFiles.push({ path: file.path, leafMode: newLeaf });
+    });
     this.leaves.push(leaf);
     return leaf;
   }
@@ -473,8 +476,16 @@ export class ItemView extends View {
 
 export class WorkspaceLeaf {
   view!: View;
+  private onOpenFile?: (file: TFile) => void;
+
+  constructor(onOpenFile?: (file: TFile) => void) {
+    this.onOpenFile = onOpenFile;
+  }
+
   async setViewState(): Promise<void> {}
-  async openFile(): Promise<void> {}
+  async openFile(file: TFile): Promise<void> {
+    this.onOpenFile?.(file);
+  }
 }
 
 export class Plugin extends Component {

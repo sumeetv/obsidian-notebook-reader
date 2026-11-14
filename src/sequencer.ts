@@ -279,10 +279,12 @@ export function buildNotebookSequence(
   sources: readonly VaultNoteSource[],
   options: {
     sortOrder: SortOrder;
+    groupByFolder?: boolean;
     excludedFolders: readonly string[];
     hideDailyNotes: boolean;
   }
 ): SequenceResult {
+  const groupByFolder = options.groupByFolder ?? true;
   const allEntries = sources.map(resolveNoteEntry);
   const allEntriesByPath = new Map<string, NoteEntry>();
   for (const entry of allEntries) {
@@ -318,6 +320,29 @@ export function buildNotebookSequence(
 
   const sequence: NoteEntry[] = [];
   const sections: FolderSection[] = [];
+
+  if (!groupByFolder) {
+    for (const entry of allEntries) {
+      const isDailyFolder = dailyFolders.has(entry.folderPath);
+      if (isFolderExcluded(entry.folderPath, options.excludedFolders)) {
+        continue;
+      }
+      if (options.hideDailyNotes && isDailyFolder) {
+        continue;
+      }
+      sequence.push(entry);
+    }
+    sequence.sort((a, b) => compareNotesWithinFolder(a, b, options.sortOrder));
+
+    return {
+      allEntries,
+      allEntriesByPath,
+      sequence,
+      sections,
+      folders,
+      dailyFolders,
+    };
+  }
 
   for (const folderPath of sortedFolderPaths) {
     const isDailyFolder = dailyFolders.has(folderPath);

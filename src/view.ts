@@ -39,17 +39,20 @@ interface PaneElements {
   roleBadgeEl: HTMLSpanElement;
   folderLabelEl: HTMLSpanElement;
   dateLabelEl: HTMLSpanElement;
+  fileLinkBtn: HTMLButtonElement;
   pinBtn: HTMLButtonElement;
   scrollEl: HTMLDivElement;
   articleEl: HTMLElement;
   titleEl: HTMLHeadingElement;
   markdownEl: HTMLDivElement;
   footerMetaEl: HTMLDivElement;
+  footerFileBtn: HTMLButtonElement;
 }
 
 interface RenderedPaneState {
   path: string;
   mtime: number;
+  role: PaneDescriptor["role"];
   component: Component;
   renderSeq: number;
 }
@@ -145,6 +148,8 @@ export class NotebookReaderView extends ItemView {
   private brandTitleEl!: HTMLSpanElement;
   private sortAlphaBtn!: HTMLButtonElement;
   private sortDateBtn!: HTMLButtonElement;
+  private groupByFolderBtn!: HTMLButtonElement;
+  private groupFlatBtn!: HTMLButtonElement;
   private foldersBtn!: HTMLButtonElement;
   private folderPopoverEl!: HTMLDivElement;
   private indexToggleBtn!: HTMLButtonElement;
@@ -295,6 +300,23 @@ export class NotebookReaderView extends ItemView {
       attr: { "data-sort": "date", "aria-pressed": "false" },
     });
 
+    const groupModeBar = topControls.createDiv({
+      cls: "nb-segmented",
+      attr: { role: "group", "aria-label": "Notebook grouping" },
+    });
+    this.groupByFolderBtn = groupModeBar.createEl("button", {
+      cls: "nb-seg-btn",
+      type: "button",
+      text: "By folder",
+      attr: { "data-group-mode": "folders", "aria-pressed": "true" },
+    });
+    this.groupFlatBtn = groupModeBar.createEl("button", {
+      cls: "nb-seg-btn",
+      type: "button",
+      text: "All files",
+      attr: { "data-group-mode": "all", "aria-pressed": "false" },
+    });
+
     const folderMenuWrap = topControls.createDiv({ cls: "nb-folder-menu-wrap" });
     this.foldersBtn = folderMenuWrap.createEl("button", {
       cls: "nb-top-btn nb-folders-btn",
@@ -408,7 +430,14 @@ export class NotebookReaderView extends ItemView {
     const folderLabelEl = metaLeft.createSpan({ cls: "nb-page-folder-pill" });
     const dateLabelEl = metaLeft.createSpan({ cls: "nb-page-date-label" });
 
-    const pinBtn = headerEl.createEl("button", {
+    const headerActions = headerEl.createDiv({ cls: "nb-page-header-actions" });
+    const fileLinkBtn = headerActions.createEl("button", {
+      cls: "nb-page-file-link",
+      type: "button",
+      text: "",
+      attr: { title: "Open note in a new tab to view or edit" },
+    });
+    const pinBtn = headerActions.createEl("button", {
       cls: "nb-pane-pin-btn",
       type: "button",
       text: side === "left" ? "Hold left" : "Hold right",
@@ -423,6 +452,12 @@ export class NotebookReaderView extends ItemView {
     const titleEl = articleEl.createEl("h1", { cls: "nb-page-title" });
     const markdownEl = articleEl.createDiv({ cls: "nb-page-markdown markdown-rendered" });
     const footerMetaEl = articleEl.createDiv({ cls: "nb-page-footer-meta" });
+    const footerFileBtn = footerMetaEl.createEl("button", {
+      cls: "nb-page-footer-file-link",
+      type: "button",
+      text: "",
+      attr: { title: "Open note in a new tab to view or edit" },
+    });
 
     return {
       paneEl,
@@ -430,12 +465,14 @@ export class NotebookReaderView extends ItemView {
       roleBadgeEl,
       folderLabelEl,
       dateLabelEl,
+      fileLinkBtn,
       pinBtn,
       scrollEl,
       articleEl,
       titleEl,
       markdownEl,
       footerMetaEl,
+      footerFileBtn,
     };
   }
 
@@ -470,6 +507,8 @@ export class NotebookReaderView extends ItemView {
   private bindInteractions(): void {
     this.registerDomEvent(this.sortAlphaBtn, "click", () => void this.setSortOrder("alpha"));
     this.registerDomEvent(this.sortDateBtn, "click", () => void this.setSortOrder("date"));
+    this.registerDomEvent(this.groupByFolderBtn, "click", () => void this.setGroupByFolder(true));
+    this.registerDomEvent(this.groupFlatBtn, "click", () => void this.setGroupByFolder(false));
 
     this.registerDomEvent(this.foldersBtn, "click", (e: MouseEvent) => {
       e.stopPropagation();
@@ -506,6 +545,10 @@ export class NotebookReaderView extends ItemView {
     this.registerDomEvent(this.holdRightBtn, "click", () => void this.holdSide("right"));
     this.registerDomEvent(this.leftPane.pinBtn, "click", () => void this.holdSide("left"));
     this.registerDomEvent(this.rightPane.pinBtn, "click", () => void this.holdSide("right"));
+    this.registerDomEvent(this.leftPane.fileLinkBtn, "click", () => void this.openNoteInNewTab("left"));
+    this.registerDomEvent(this.rightPane.fileLinkBtn, "click", () => void this.openNoteInNewTab("right"));
+    this.registerDomEvent(this.leftPane.footerFileBtn, "click", () => void this.openNoteInNewTab("left"));
+    this.registerDomEvent(this.rightPane.footerFileBtn, "click", () => void this.openNoteInNewTab("right"));
     this.registerDomEvent(this.consecutiveBtn, "click", () => void this.returnToConsecutive());
     this.registerDomEvent(this.swapBtn, "click", () => void this.swapHeldAndCurrent());
     this.registerDomEvent(this.compareBtn, "click", () => void this.toggleCompare());
@@ -653,6 +696,18 @@ export class NotebookReaderView extends ItemView {
     await this.host.persistState();
   }
 
+  private async setGroupByFolder(groupByFolder: boolean): Promise<void> {
+    const state = this.host.getStateManager();
+    if (state.groupByFolder === groupByFolder) return;
+    this.snapshotLiveAnchors();
+    state.setGroupByFolder(groupByFolder);
+    await this.refresh({ forcePaneRerender: false });
+    if (this.folderPopoverOpen && this.lastSequence) {
+      this.syncFolderPopoverState(this.lastSequence.folders);
+    }
+    await this.host.persistState();
+  }
+
   private async setIndexOpen(open: boolean): Promise<void> {
     const state = this.host.getStateManager();
     if (state.indexOpen === open) return;
@@ -682,14 +737,31 @@ export class NotebookReaderView extends ItemView {
 
   private renderFolderPopover(folders: readonly FolderSummary[]): void {
     const state = this.host.getStateManager();
+    const prevListEl = this.folderPopoverEl.querySelector(".nb-popover-folder-list") as HTMLElement | null;
+    const prevScrollTop = prevListEl ? prevListEl.scrollTop : 0;
+
     this.folderPopoverEl.empty();
 
     const header = this.folderPopoverEl.createDiv({ cls: "nb-popover-header" });
     header.createSpan({ cls: "nb-popover-title", text: "Sections & exclusions" });
 
+    const groupToggleLabel = this.folderPopoverEl.createEl("label", {
+      cls: "nb-popover-row is-group-toggle",
+    });
+    const groupCheckbox = groupToggleLabel.createEl("input", {
+      type: "checkbox",
+      attr: { "data-popover-role": "group-by-folder" },
+    });
+    groupCheckbox.checked = state.groupByFolder;
+    groupToggleLabel.createSpan({ text: "Section by folders" });
+    groupCheckbox.addEventListener("change", () => {
+      void this.setGroupByFolder(groupCheckbox.checked);
+    });
+
     const dailyToggleLabel = this.folderPopoverEl.createEl("label", { cls: "nb-popover-row is-daily-toggle" });
     const dailyCheckbox = dailyToggleLabel.createEl("input", {
       type: "checkbox",
+      attr: { "data-popover-role": "include-daily" },
     });
     dailyCheckbox.checked = !state.hideDailyNotes;
     dailyToggleLabel.createSpan({ text: "Include daily-note folders" });
@@ -700,7 +772,10 @@ export class NotebookReaderView extends ItemView {
     const listEl = this.folderPopoverEl.createDiv({ cls: "nb-popover-folder-list" });
     for (const folder of folders) {
       const row = listEl.createEl("label", { cls: "nb-popover-row" });
-      const checkbox = row.createEl("input", { type: "checkbox" });
+      const checkbox = row.createEl("input", {
+        type: "checkbox",
+        attr: { "data-popover-folder": folder.folderPath },
+      });
       const isExcludedExplicitly = state.excludedFolders.includes(folder.folderPath);
       const disabledByDaily = state.hideDailyNotes && folder.isDailyFolder;
       checkbox.checked = !isExcludedExplicitly && !disabledByDaily;
@@ -716,6 +791,42 @@ export class NotebookReaderView extends ItemView {
         void this.toggleFolderInclusion(folder.folderPath);
       });
     }
+
+    if (prevScrollTop > 0) {
+      listEl.scrollTop = prevScrollTop;
+    }
+  }
+
+  private syncFolderPopoverState(folders: readonly FolderSummary[]): void {
+    const state = this.host.getStateManager();
+    const existingRows = this.folderPopoverEl.querySelectorAll<HTMLInputElement>("input[data-popover-folder]");
+    if (existingRows.length !== folders.length) {
+      this.renderFolderPopover(folders);
+      return;
+    }
+
+    const groupCheckbox = this.folderPopoverEl.querySelector<HTMLInputElement>(
+      'input[data-popover-role="group-by-folder"]'
+    );
+    if (groupCheckbox) {
+      groupCheckbox.checked = state.groupByFolder;
+    }
+
+    const dailyCheckbox = this.folderPopoverEl.querySelector<HTMLInputElement>(
+      'input[data-popover-role="include-daily"]'
+    );
+    if (dailyCheckbox) {
+      dailyCheckbox.checked = !state.hideDailyNotes;
+    }
+
+    existingRows.forEach((checkbox, idx) => {
+      const folder = folders[idx];
+      if (!folder) return;
+      const isExcludedExplicitly = state.excludedFolders.includes(folder.folderPath);
+      const disabledByDaily = state.hideDailyNotes && folder.isDailyFolder;
+      checkbox.checked = !isExcludedExplicitly && !disabledByDaily;
+      checkbox.disabled = disabledByDaily;
+    });
   }
 
   private async toggleIncludeDailyNotes(includeDaily: boolean): Promise<void> {
@@ -723,7 +834,7 @@ export class NotebookReaderView extends ItemView {
     this.host.getStateManager().setHideDailyNotes(!includeDaily);
     await this.refresh({ forcePaneRerender: false });
     if (this.folderPopoverOpen && this.lastSequence) {
-      this.renderFolderPopover(this.lastSequence.folders);
+      this.syncFolderPopoverState(this.lastSequence.folders);
     }
     await this.host.persistState();
   }
@@ -733,9 +844,24 @@ export class NotebookReaderView extends ItemView {
     this.host.getStateManager().toggleFolderExclusion(folderPath);
     await this.refresh({ forcePaneRerender: false });
     if (this.folderPopoverOpen && this.lastSequence) {
-      this.renderFolderPopover(this.lastSequence.folders);
+      this.syncFolderPopoverState(this.lastSequence.folders);
     }
     await this.host.persistState();
+  }
+
+  private async openNoteInNewTab(side: PaneSide): Promise<void> {
+    const desc = this.currentDescriptors[side];
+    if (!desc) return;
+
+    const abstractFile = this.app.vault.getAbstractFileByPath(desc.entry.path);
+    if (!(abstractFile instanceof TFile)) {
+      new Notice("Note file could not be found in vault.");
+      return;
+    }
+
+    const leaf = this.app.workspace.getLeaf("tab");
+    await leaf.openFile(abstractFile);
+    this.app.workspace.revealLeaf(leaf);
   }
 
   private async navigateToNote(path: string): Promise<void> {
@@ -850,6 +976,11 @@ export class NotebookReaderView extends ItemView {
     this.sortDateBtn.toggleClass("is-active", state.sortOrder === "date");
     this.sortDateBtn.setAttr("aria-pressed", state.sortOrder === "date" ? "true" : "false");
 
+    this.groupByFolderBtn.toggleClass("is-active", state.groupByFolder);
+    this.groupByFolderBtn.setAttr("aria-pressed", state.groupByFolder ? "true" : "false");
+    this.groupFlatBtn.toggleClass("is-active", !state.groupByFolder);
+    this.groupFlatBtn.setAttr("aria-pressed", !state.groupByFolder ? "true" : "false");
+
     const hiddenCount = seqResult.folders.filter((f) => f.isExcluded).length;
     this.foldersBtn.setText(hiddenCount > 0 ? `Folders (${hiddenCount} hidden) ▾` : "Folders ▾");
 
@@ -868,7 +999,12 @@ export class NotebookReaderView extends ItemView {
 
     // Update right rail (either Thumb-edge or Indexed Folio)
     if (state.indexOpen && this.folioIndex) {
-      this.folioIndex.render({ sections: seqResult.sections, spread });
+      this.folioIndex.render({
+        sequence: seqResult.sequence,
+        sections: seqResult.sections,
+        groupByFolder: state.groupByFolder,
+        spread,
+      });
     } else if (!state.indexOpen && this.thumbEdge) {
       this.thumbEdge.update({
         sequence: seqResult.sequence,
@@ -950,6 +1086,9 @@ export class NotebookReaderView extends ItemView {
       pane.roleBadgeEl.setText("");
       pane.folderLabelEl.setText("");
       pane.dateLabelEl.setText("");
+      pane.fileLinkBtn.setText("");
+      pane.fileLinkBtn.disabled = true;
+      pane.fileLinkBtn.setAttr("hidden", "true");
       pane.pinBtn.disabled = true;
       pane.pinBtn.setAttr("aria-pressed", "false");
       pane.titleEl.setText("");
@@ -977,7 +1116,9 @@ export class NotebookReaderView extends ItemView {
           text: "You have reached the final note in the current sequence.",
         });
       }
-      pane.footerMetaEl.setText("");
+      pane.footerFileBtn.setText("");
+      pane.footerFileBtn.disabled = true;
+      pane.footerFileBtn.setAttr("hidden", "true");
       pane.scrollEl.scrollTop = 0;
       return;
     }
@@ -1003,6 +1144,15 @@ export class NotebookReaderView extends ItemView {
     );
     pane.dateLabelEl.setText(descriptor.entry.dateLabel);
 
+    pane.fileLinkBtn.removeAttribute("hidden");
+    pane.fileLinkBtn.disabled = false;
+    pane.fileLinkBtn.setText(`${descriptor.entry.basename}.md ↗`);
+    pane.fileLinkBtn.setAttr("data-open-file", descriptor.entry.path);
+    pane.fileLinkBtn.setAttr(
+      "title",
+      `Open ${descriptor.entry.path} in a new tab to view or edit`
+    );
+
     pane.pinBtn.disabled = false;
     pane.pinBtn.setText(descriptor.isPinned ? "Pinned ✓" : side === "left" ? "Hold left" : "Hold right");
     pane.pinBtn.setAttr("aria-pressed", descriptor.isPinned ? "true" : "false");
@@ -1017,8 +1167,11 @@ export class NotebookReaderView extends ItemView {
       prevRendered.mtime === descriptor.entry.mtime;
 
     if (sameNoteAndMtime) {
-      // Keep existing rendered Markdown DOM intact, ensuring exact anchor remains applied
-      this.applyPaneScrollRestore(side, pane.scrollEl, descriptor.anchor);
+      const roleChanged = prevRendered.role !== descriptor.role;
+      prevRendered.role = descriptor.role;
+      if (roleChanged) {
+        this.applyPaneScrollRestore(side, pane.scrollEl, descriptor.anchor);
+      }
       return;
     }
 
@@ -1031,13 +1184,17 @@ export class NotebookReaderView extends ItemView {
     this.renderedPanes[side] = {
       path: descriptor.entry.path,
       mtime: descriptor.entry.mtime,
+      role: descriptor.role,
       component: childComponent,
       renderSeq,
     };
 
     pane.titleEl.setText(descriptor.entry.title);
     pane.markdownEl.empty();
-    pane.footerMetaEl.setText(descriptor.entry.path);
+    pane.footerFileBtn.removeAttribute("hidden");
+    pane.footerFileBtn.disabled = false;
+    pane.footerFileBtn.setText(`${descriptor.entry.path} ↗`);
+    pane.footerFileBtn.setAttr("data-open-file", descriptor.entry.path);
 
     const abstractFile = this.app.vault.getAbstractFileByPath(descriptor.entry.path);
     if (!(abstractFile instanceof TFile)) {
@@ -1102,6 +1259,7 @@ export function buildVaultSequence(
   }));
   return buildNotebookSequence(sources, {
     sortOrder: state.sortOrder,
+    groupByFolder: state.groupByFolder,
     excludedFolders: state.excludedFolders,
     hideDailyNotes: state.hideDailyNotes,
   });

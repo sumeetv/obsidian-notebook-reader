@@ -442,4 +442,166 @@ describe("NotebookReaderView DOM & interaction flows", () => {
     expect(css).toContain("grid-template-columns: minmax(0, 1fr) 16px minmax(0, 1fr);");
     expect(css).toContain("scrollbar-gutter: stable;");
   });
+
+  it("supports unsectioned All files sorting (A-Z and Date), preserves popover and reading scroll on checkbox click, and opens file in new tab", async () => {
+    const { app, view } = await mountPluginView([
+      {
+        path: "Walks/Alpha walk.md",
+        content: "---\ntitle: Alpha walk\ndate: 2026-10-20\n---\n\nAlpha walk content.",
+      },
+      {
+        path: "Ideas/Zeta idea.md",
+        content: "---\ntitle: Zeta idea\ndate: 2026-10-01\n---\n\nZeta idea content.",
+      },
+      {
+        path: "Reading/Middle note.md",
+        content: "---\ntitle: Middle note\ndate: 2026-10-10\n---\n\nMiddle note content.",
+      },
+      {
+        path: "Notes/Other.md",
+        content: "---\ntitle: Other\ndate: 2026-10-30\n---\n\nOther note.",
+      },
+    ]);
+
+    // Default By folder: Ideas comes first -> Zeta idea is left page
+    expect(view.contentEl.querySelector('.nb-page-left .nb-page-title')?.textContent).toBe("Zeta idea");
+
+    // Switch to All files (unsectioned) -> Alpha walk (Walks/) becomes first globally in A-Z mode
+    const allFilesBtn = view.contentEl.querySelector('[data-group-mode="all"]') as HTMLButtonElement;
+    allFilesBtn.click();
+    await new Promise((r) => setTimeout(r, 15));
+
+    // Protruding folder tabs should be hidden in All files mode
+    expect(view.contentEl.querySelector(".nb-edge-tabs")?.hasAttribute("hidden")).toBe(true);
+
+    // Jump to first note via Prev or check flat Folio index order
+    (view.contentEl.querySelector(".nb-index-btn") as HTMLButtonElement).click();
+    await new Promise((r) => setTimeout(r, 15));
+    const flatTitlesAlpha = Array.from(
+      view.contentEl.querySelectorAll(".nb-folio-item-title")
+    ).map((el) => el.textContent);
+    expect(flatTitlesAlpha).toEqual(["Alpha walk", "Middle note", "Other", "Zeta idea"]);
+    expect(view.contentEl.querySelectorAll(".nb-folio-section-header").length).toBe(0);
+
+    // Switch to Date ordering while in All files mode -> global chronological order across folders
+    (view.contentEl.querySelector('[data-sort="date"]') as HTMLButtonElement).click();
+    await new Promise((r) => setTimeout(r, 15));
+    const flatTitlesDate = Array.from(
+      view.contentEl.querySelectorAll(".nb-folio-item-title")
+    ).map((el) => el.textContent);
+    expect(flatTitlesDate).toEqual(["Zeta idea", "Middle note", "Alpha walk", "Other"]);
+
+    // Verify clicking checkboxes in Sections & exclusions popover does not scroll popover or reading pane to top
+    const leftScroll = view.contentEl.querySelector('[data-pane-scroll="left"]') as HTMLElement;
+    Object.defineProperty(leftScroll, "scrollHeight", { configurable: true, value: 1800 });
+    Object.defineProperty(leftScroll, "clientHeight", { configurable: true, value: 500 });
+    leftScroll.scrollTop = 310;
+    leftScroll.dispatchEvent(new Event("scroll"));
+
+    (view.contentEl.querySelector(".nb-folders-btn") as HTMLButtonElement).click();
+    const popoverList = view.contentEl.querySelector(".nb-popover-folder-list") as HTMLElement;
+    Object.defineProperty(popoverList, "scrollHeight", { configurable: true, value: 600 });
+    Object.defineProperty(popoverList, "clientHeight", { configurable: true, value: 200 });
+    popoverList.scrollTop = 140;
+
+    const notesCheckbox = view.contentEl.querySelector(
+      'input[data-popover-folder="Notes"]'
+    ) as HTMLInputElement;
+    notesCheckbox.checked = false;
+    notesCheckbox.dispatchEvent(new Event("change"));
+    await new Promise((r) => setTimeout(r, 15));
+
+    // Neither the popover folder list nor the open reading pane scrolled back to 0
+    expect(popoverList.scrollTop).toBe(140);
+    expect(leftScroll.scrollTop).toBe(310);
+
+    // Clicking the filename link in the page header opens that note in a new tab
+    const headerFileBtn = view.contentEl.querySelector(
+      ".nb-page-left .nb-page-file-link"
+    ) as HTMLButtonElement;
+    expect(headerFileBtn.textContent).toContain("Zeta idea.md");
+    headerFileBtn.click();
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(app.workspace.openedFiles).toEqual([
+      { path: "Ideas/Zeta idea.md", leafMode: "tab" },
+    ]);
+
+    // Clicking the footer path link also opens the note in a new tab
+    const footerFileBtn = view.contentEl.querySelector(
+      ".nb-page-right .nb-page-footer-file-link"
+    ) as HTMLButtonElement;
+    footerFileBtn.click();
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(app.workspace.openedFiles[1]).toEqual({
+      path: "Reading/Middle note.md",
+      leafMode: "tab",
+    });
+  });
+
+  it("left-aligns pane header filename links in CSS and shows folder tab full-name tooltip on hover and iPad touch long press", async () => {
+    const css = fs.readFileSync(path.resolve(__dirname, "../styles.css"), "utf8");
+    const fileLinkRuleMatch = css.match(/\.nb-page-file-link\s*\{[^}]*\}/);
+    expect(fileLinkRuleMatch?.[0]).toContain("text-align: left;");
+    expect(fileLinkRuleMatch?.[0]).toContain("justify-content: flex-start;");
+
+    const { view } = await mountPluginView([
+      {
+        path: "Alpha/First note.md",
+        content: "---\ntitle: First note\n---\n\nFirst content.",
+      },
+      {
+        path: "Projects/Quarterly Planning Archive/Deep Topic.md",
+        content: "---\ntitle: Deep Topic\n---\n\nNested folder content.",
+      },
+    ]);
+
+    expect(view.contentEl.querySelector('.nb-page-left .nb-page-title')?.textContent).toBe("First note");
+
+    const nestedTab = view.contentEl.querySelector(
+      '.nb-folder-tab[data-folder-path="Projects/Quarterly Planning Archive"]'
+    ) as HTMLButtonElement;
+    const tooltip = view.contentEl.querySelector(".nb-folder-tab-tooltip") as HTMLElement;
+    expect(nestedTab).not.toBeNull();
+    expect(tooltip).not.toBeNull();
+    expect(tooltip.hasAttribute("hidden")).toBe(true);
+
+    // Desktop hover reveals full section label tooltip and leave hides it
+    nestedTab.dispatchEvent(new MouseEvent("mouseenter"));
+    expect(tooltip.hasAttribute("hidden")).toBe(false);
+    expect(tooltip.textContent).toBe("Projects/Quarterly Planning Archive");
+
+    nestedTab.dispatchEvent(new MouseEvent("mouseleave"));
+    expect(tooltip.hasAttribute("hidden")).toBe(true);
+
+    // Touch long press shows full folder name tooltip without triggering folder navigation on release
+    nestedTab.dispatchEvent(
+      new PointerEvent("pointerdown", {
+        pointerId: 12,
+        pointerType: "touch",
+        clientX: 980,
+        clientY: 220,
+        bubbles: true,
+      })
+    );
+    await new Promise((r) => setTimeout(r, 440));
+    expect(tooltip.hasAttribute("hidden")).toBe(false);
+    expect(tooltip.textContent).toBe("Projects/Quarterly Planning Archive");
+
+    nestedTab.dispatchEvent(
+      new PointerEvent("pointerup", {
+        pointerId: 12,
+        pointerType: "touch",
+        clientX: 980,
+        clientY: 220,
+        bubbles: true,
+      })
+    );
+    nestedTab.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 15));
+
+    expect(tooltip.hasAttribute("hidden")).toBe(true);
+    expect(view.contentEl.querySelector('.nb-page-left .nb-page-title')?.textContent).toBe("First note");
+  });
 });

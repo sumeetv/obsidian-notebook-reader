@@ -9,28 +9,30 @@ Implements the **Thumb-edge Notebook** primary experience with the optional **In
 - **Two-page open-book spread** ([`src/view.ts`](src/view.ts), [`styles.css`](styles.css)):
   - Equal-width facing panes (`grid-template-columns: minmax(0, 1fr) 16px minmax(0, 1fr)`) separated by a central binding gutter, with `scrollbar-gutter: stable` on both independent vertical scroll containers so text widths match even when only one note overflows.
   - Real Obsidian Markdown rendering via `MarkdownRenderer.render()` with YAML frontmatter stripping, internal link navigation (`[[...]]`), and embed rendering (`![[...]]`).
+  - Clickable note filename in each pane's header and footer path opens that note in a new Obsidian workspace tab (`workspace.getLeaf("tab")`) for quick viewing or editing.
   - Narrow-screen fallback (`< 740px` container width) via a slot switcher that preserves both reading locations and scroll anchors.
 - **Thumb-edge navigation** ([`src/thumb-edge.ts`](src/thumb-edge.ts)):
-  - Stacked fore-edge scrub rail and protruding folder section tabs allocated in a separate right rail outside the reading spread.
+  - Stacked fore-edge scrub rail and protruding folder section tabs allocated in a separate right rail outside the reading spread (tabs are hidden automatically when browsing in unsectioned `All files` mode).
   - Press-and-glide touch scrubbing (and desktop pointer hover) shows a floating preview card positioned above and to the left of the touch point with note title, folder, and page position.
   - Previewing reads only in-memory sequence metadata (no vault reads during pointer movement) and leaves the open spread untouched until release; `pointercancel` or `Escape` cancels cleanly.
   - Accessible `← Prev` / `Next →` buttons, keyboard arrow/`Home`/`End` support on the edge slider, and deliberate horizontal swipe navigation distinct from vertical/diagonal reading scroll.
 - **Automatic sequence and folder sections** ([`src/sequencer.ts`](src/sequencer.ts)):
-  - **Root-level notes** (`""` folder path) are grouped first under the `"Root"` section.
+  - **By folder vs. All files grouping**: Choose **By folder** (default) to group notes under folder sections, or switch to **All files** (from the toolbar toggle, **Folders** popover, or plugin settings) to sort all included vault notes globally by `A–Z` or `Date` without folder sectioning.
+  - **Root-level notes** (`""` folder path) are grouped first under the `"Root"` section when sectioning by folder.
   - **Nested folders** sort segment-by-segment using case-insensitive natural ordering so every parent folder appears immediately ahead of its nested subfolders (e.g., `Ideas`, then `Ideas/Drafts`, then `Ideas Archive`).
-  - **Ordering within folders**: Alphabetical (`alpha`, default) by frontmatter `title` (falling back to filename `basename`), or chronological (`date`, oldest first) resolved deterministically in priority order:
+  - **Ordering**: Alphabetical (`alpha`, default) by frontmatter `title` (falling back to filename `basename`), or chronological (`date`, oldest first) resolved deterministically in priority order:
     1. Valid frontmatter `date`, `created`, `created_at`, or `date_created`
     2. Leading `YYYY-MM-DD` filename prefix
     3. `file.stat.ctime`
     4. `file.stat.mtime`
-  - **Folder exclusions & daily notes**: Excluding a folder hides it and its nested subfolders and persists across sessions. Daily-note folders (segment names matching `Daily`, `Daily Notes`, `Dailies`, `Journal`, `Journals`, or folders where ≥ 50% of notes begin with `YYYY-MM-DD`) are excluded by default and toggleable from the toolbar or plugin settings.
+  - **Folder exclusions & daily notes**: Excluding a folder hides it and its nested subfolders and persists across sessions. Daily-note folders (segment names matching `Daily`, `Daily Notes`, `Dailies`, `Journal`, `Journals`, or folders where ≥ 50% of notes begin with `YYYY-MM-DD`) are excluded by default and toggleable from the **Folders** popover (updating checkboxes in-place without resetting the popover or reading scroll positions) or plugin settings.
 - **Placekeeping and comparison** ([`src/state.ts`](src/state.ts)):
   - Distinct **Current** and **Held** positions with passage anchors (`scrollTop`, `scrollRatio`, visible `blockIndex`, `blockOffsetRatio`).
   - Hold either the left or right visible page in place while browsing the opposite pane independently, return explicitly to **Consecutive** browsing, **Swap** current and held passages (preserving scroll positions), or **Compare** held and current side by side.
   - Held notes in excluded folders remain preserved and are labeled `Outside current filter`.
   - Handles vault `create`, `modify`, `rename`, and `delete` events cleanly.
 - **Optional Indexed Folio** ([`src/folio-index.ts`](src/folio-index.ts)):
-  - Toggleable folder-grouped index sharing the exact same sequence, exclusions, and Current/Held badges as the thumb-edge, without disturbing reading positions when opened or closed.
+  - Toggleable index (folder-grouped in **By folder** mode or flat list in **All files** mode) sharing the exact same sequence, exclusions, and Current/Held badges as the thumb-edge, without disturbing reading positions when opened or closed.
 
 ## Architecture
 

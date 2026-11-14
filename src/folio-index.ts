@@ -1,4 +1,4 @@
-import type { FolderSection, SpreadSnapshot } from "./types/notebook";
+import type { FolderSection, NoteEntry, SpreadSnapshot } from "./types/notebook";
 
 export interface FolioIndexCallbacks {
   onSelectNote: (path: string) => void;
@@ -7,7 +7,9 @@ export interface FolioIndexCallbacks {
 }
 
 export interface FolioIndexModel {
+  sequence: readonly NoteEntry[];
   sections: readonly FolderSection[];
+  groupByFolder: boolean;
   spread: SpreadSnapshot;
 }
 
@@ -67,7 +69,7 @@ export class FolioIndexPanel {
       heldItem.addEventListener("click", () => this.callbacks.onActivateHeld());
     }
 
-    if (model.sections.length === 0) {
+    if (model.sequence.length === 0) {
       const empty = listEl.createDiv({ cls: "nb-folio-empty" });
       empty.createDiv({ cls: "nb-folio-empty-title", text: "No notes in sequence" });
       empty.createDiv({
@@ -85,6 +87,51 @@ export class FolioIndexPanel {
           : null;
     const heldPath = model.spread.heldEntry?.path ?? null;
 
+    const appendNoteRow = (parent: HTMLElement, note: NoteEntry, pageNumber: number, showFolder: boolean) => {
+      const isCurrent = currentPath === note.path;
+      const isHeld = heldPath === note.path;
+
+      const btn = parent.createEl("button", {
+        cls: "nb-folio-item",
+        type: "button",
+        attr: {
+          "data-note-path": note.path,
+          "aria-current": isCurrent ? "page" : "false",
+        },
+      });
+      btn.toggleClass("is-current", isCurrent);
+      btn.toggleClass("is-held", isHeld);
+
+      const itemMain = btn.createDiv({ cls: "nb-folio-item-main" });
+      itemMain.createDiv({ cls: "nb-folio-item-title", text: note.title });
+      itemMain.createDiv({
+        cls: "nb-folio-item-sub",
+        text: showFolder
+          ? `${note.sectionLabel} · ${note.dateLabel} · p. ${pageNumber}`
+          : `${note.dateLabel} · p. ${pageNumber}`,
+      });
+
+      const badges = btn.createDiv({ cls: "nb-folio-badges" });
+      if (isCurrent) {
+        badges.createSpan({ cls: "nb-folio-badge is-current", text: "Current" });
+      }
+      if (isHeld) {
+        badges.createSpan({ cls: "nb-folio-badge is-held", text: "Held" });
+      }
+
+      btn.addEventListener("click", () => {
+        this.callbacks.onSelectNote(note.path);
+      });
+    };
+
+    if (!model.groupByFolder) {
+      const flatGroup = listEl.createDiv({ cls: "nb-folio-section is-flat" });
+      model.sequence.forEach((note, index) => {
+        appendNoteRow(flatGroup, note, index + 1, true);
+      });
+      return;
+    }
+
     let runningNumber = 0;
     for (const section of model.sections) {
       const groupEl = listEl.createDiv({ cls: "nb-folio-section" });
@@ -97,38 +144,7 @@ export class FolioIndexPanel {
 
       for (const note of section.notes) {
         runningNumber += 1;
-        const isCurrent = currentPath === note.path;
-        const isHeld = heldPath === note.path;
-
-        const btn = groupEl.createEl("button", {
-          cls: "nb-folio-item",
-          type: "button",
-          attr: {
-            "data-note-path": note.path,
-            "aria-current": isCurrent ? "page" : "false",
-          },
-        });
-        btn.toggleClass("is-current", isCurrent);
-        btn.toggleClass("is-held", isHeld);
-
-        const itemMain = btn.createDiv({ cls: "nb-folio-item-main" });
-        itemMain.createDiv({ cls: "nb-folio-item-title", text: note.title });
-        itemMain.createDiv({
-          cls: "nb-folio-item-sub",
-          text: `${note.dateLabel} · p. ${runningNumber}`,
-        });
-
-        const badges = btn.createDiv({ cls: "nb-folio-badges" });
-        if (isCurrent) {
-          badges.createSpan({ cls: "nb-folio-badge is-current", text: "Current" });
-        }
-        if (isHeld) {
-          badges.createSpan({ cls: "nb-folio-badge is-held", text: "Held" });
-        }
-
-        btn.addEventListener("click", () => {
-          this.callbacks.onSelectNote(note.path);
-        });
+        appendNoteRow(groupEl, note, runningNumber, false);
       }
     }
   }
