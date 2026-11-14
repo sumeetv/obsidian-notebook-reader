@@ -1,0 +1,9 @@
+{
+  "id": "obsidian-notebook-reader",
+  "name": "Notebook Reader",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "An iPad-first, mobile-compatible physical notebook reader for perusing your vault with two equal-width pages, thumb-edge previews, held places, and an optional Folio index.",
+  "author": "Obsidian Notebook Reader Contributors",
+  "isDesktopOnly": false
+}
