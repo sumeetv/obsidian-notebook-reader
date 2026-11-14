@@ -26,6 +26,7 @@ export class ThumbEdgeController {
   private previewTitleEl: HTMLDivElement | null = null;
   private previewMetaEl: HTMLDivElement | null = null;
   private tabsEl: HTMLDivElement | null = null;
+  private tabTooltipEl: HTMLDivElement | null = null;
 
   private model: ThumbEdgeRenderModel = {
     sequence: [],
@@ -45,6 +46,8 @@ export class ThumbEdgeController {
   private activePointerId: number | null = null;
   private isHovering = false;
   private previewIndex: number | null = null;
+  private longPressTimer: number | null = null;
+  private longPressTriggered = false;
   private cleanups: Array<() => void> = [];
 
   constructor(hostEl: HTMLElement, callbacks: ThumbEdgeCallbacks) {
@@ -110,11 +113,24 @@ export class ThumbEdgeController {
       attr: { role: "navigation", "aria-label": "Folder sections" },
     });
 
+    this.tabTooltipEl = this.rootEl.createDiv({
+      cls: "nb-folder-tab-tooltip",
+      attr: { role: "tooltip", hidden: "true" },
+    });
+
     this.bindEvents();
   }
 
   private bindEvents(): void {
     if (!this.trackEl || !this.heldMarkerBtn) return;
+
+    const onTabsScroll = () => {
+      this.hideTabTooltip();
+    };
+    this.tabsEl?.addEventListener("scroll", onTabsScroll, { passive: true });
+    this.cleanups.push(() => {
+      this.tabsEl?.removeEventListener("scroll", onTabsScroll);
+    });
 
     const onHeldClick = (e: MouseEvent) => {
       e.stopPropagation();
@@ -324,6 +340,39 @@ export class ThumbEdgeController {
     this.syncMarkers();
   }
 
+  private clearLongPressTimer(): void {
+    if (this.longPressTimer !== null) {
+      window.clearTimeout(this.longPressTimer);
+      this.longPressTimer = null;
+    }
+  }
+
+  private showTabTooltip(section: FolderSection, tabBtn: HTMLElement): void {
+    if (!this.tabTooltipEl || !this.rootEl) return;
+
+    this.tabTooltipEl.setText(section.sectionLabel);
+    this.tabTooltipEl.setAttr("data-tooltip-folder", section.folderPath);
+    this.tabTooltipEl.removeAttribute("hidden");
+
+    const shellRect = this.rootEl.getBoundingClientRect();
+    const tabRect = tabBtn.getBoundingClientRect();
+    let centerTop = 24;
+    if (shellRect.height > 0 && tabRect.height > 0) {
+      centerTop = tabRect.top - shellRect.top + tabRect.height / 2;
+      centerTop = Math.max(20, Math.min(shellRect.height - 20, centerTop));
+    } else if (tabBtn.offsetHeight > 0) {
+      centerTop = tabBtn.offsetTop + tabBtn.offsetHeight / 2;
+    }
+    this.tabTooltipEl.style.top = `${Math.round(centerTop)}px`;
+  }
+
+  private hideTabTooltip(): void {
+    this.clearLongPressTimer();
+    if (!this.tabTooltipEl) return;
+    this.tabTooltipEl.setAttr("hidden", "true");
+    this.tabTooltipEl.removeAttribute("data-tooltip-folder");
+  }
+
   update(model: ThumbEdgeRenderModel): void {
     this.model = model;
     this.renderTabs();
@@ -389,6 +438,7 @@ export class ThumbEdgeController {
 
   private renderTabs(): void {
     if (!this.tabsEl) return;
+    this.hideTabTooltip();
     this.tabsEl.empty();
 
     const activeFolder = this.model.spread.left?.role === "current"
@@ -398,8 +448,11 @@ export class ThumbEdgeController {
         : null;
 
     if (this.model.sections.length === 0) {
+      this.tabsEl.setAttr("hidden", "true");
       return;
     }
+
+    this.tabsEl.removeAttribute("hidden");
 
     for (const section of this.model.sections) {
       const isCurrentFolder = activeFolder === section.folderPath;
@@ -409,19 +462,84 @@ export class ThumbEdgeController {
         attr: {
           "data-folder-path": section.folderPath,
           "aria-pressed": isCurrentFolder ? "true" : "false",
-          title: `${section.sectionLabel} (${section.notes.length})`,
+          "aria-label": `${section.sectionLabel} (${section.notes.length})`,
+          title: section.sectionLabel,
         },
       });
       tabBtn.toggleClass("is-active", isCurrentFolder);
       tabBtn.createSpan({ cls: "nb-folder-tab-label", text: section.tabLabel });
       tabBtn.createSpan({ cls: "nb-folder-tab-count", text: String(section.notes.length) });
-      tabBtn.addEventListener("click", () => {
+
+      let pressStartX = 0;
+      let pressStartY = 0;
+
+      tabBtn.addEventListener("mouseenter", () => {
+        this.showTabTooltip(section, tabBtn);
+      });
+      tabBtn.addEventListener("focus", () => {
+        this.showTabTooltip(section, tabBtn);
+      });
+      tabBtn.addEventListener("mouseleave", () => {
+        this.hideTabTooltip();
+      });
+      tabBtn.addEventListener("blur", () => {
+        this.hideTabTooltip();
+      });
+
+      tabBtn.addEventListener("pointerdown", (e: PointerEvent) => {
+        this.longPressTriggered = false;
+        if (e.pointerType === "mouse") return;
+        pressStartX = e.clientX;
+        pressStartY = e.clientY;
+        this.clearLongPressTimer();
+        this.longPressTimer = window.setTimeout(() => {
+          this.longPressTimer = null;
+          this.longPressTriggered = true;
+          this.showTabTooltip(section, tabBtn);
+        }, 420);
+      });
+
+      tabBtn.addEventListener("pointermove", (e: PointerEvent) => {
+        if (this.longPressTimer === null) return;
+        if (Math.hypot(e.clientX - pressStartX, e.clientY - pressStartY) > 10) {
+          this.clearLongPressTimer();
+        }
+      });
+
+      tabBtn.addEventListener("contextmenu", (e: MouseEvent) => {
+        e.preventDefault();
+        this.longPressTriggered = true;
+        this.showTabTooltip(section, tabBtn);
+      });
+
+      tabBtn.addEventListener("pointerup", (e: PointerEvent) => {
+        this.clearLongPressTimer();
+        if (e.pointerType !== "mouse") {
+          this.hideTabTooltip();
+        }
+      });
+
+      tabBtn.addEventListener("pointercancel", (e: PointerEvent) => {
+        this.clearLongPressTimer();
+        if (e.pointerType !== "mouse") {
+          this.hideTabTooltip();
+        }
+      });
+
+      tabBtn.addEventListener("click", (e: MouseEvent) => {
+        if (this.longPressTriggered) {
+          this.longPressTriggered = false;
+          e.preventDefault();
+          return;
+        }
+        this.hideTabTooltip();
         this.callbacks.onSelectFolder(section.folderPath);
       });
     }
   }
 
   destroy(): void {
+    this.hideTabTooltip();
     for (const cleanup of this.cleanups) {
       cleanup();
     }

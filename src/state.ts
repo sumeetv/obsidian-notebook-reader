@@ -45,6 +45,7 @@ export function cloneAnchor(anchor?: Partial<PassageAnchor> | null): PassageAnch
 export function createDefaultPersistedData(): NotebookPersistedData {
   return {
     sortOrder: "alpha",
+    groupByFolder: true,
     excludedFolders: [],
     hideDailyNotes: true,
     indexOpen: false,
@@ -109,6 +110,8 @@ export class NotebookStateManager {
 
     this.data = {
       sortOrder,
+      groupByFolder:
+        typeof raw.groupByFolder === "boolean" ? raw.groupByFolder : defaults.groupByFolder,
       excludedFolders,
       hideDailyNotes: typeof raw.hideDailyNotes === "boolean" ? raw.hideDailyNotes : defaults.hideDailyNotes,
       indexOpen: typeof raw.indexOpen === "boolean" ? raw.indexOpen : defaults.indexOpen,
@@ -123,6 +126,7 @@ export class NotebookStateManager {
   getData(): NotebookPersistedData {
     return {
       sortOrder: this.data.sortOrder,
+      groupByFolder: this.data.groupByFolder,
       excludedFolders: [...this.data.excludedFolders],
       hideDailyNotes: this.data.hideDailyNotes,
       indexOpen: this.data.indexOpen,
@@ -142,6 +146,10 @@ export class NotebookStateManager {
 
   get sortOrder(): SortOrder {
     return this.data.sortOrder;
+  }
+
+  get groupByFolder(): boolean {
+    return this.data.groupByFolder;
   }
 
   get excludedFolders(): readonly string[] {
@@ -174,6 +182,14 @@ export class NotebookStateManager {
 
   setSortOrder(order: SortOrder): void {
     this.data.sortOrder = order;
+  }
+
+  setGroupByFolder(groupByFolder: boolean): void {
+    this.data.groupByFolder = groupByFolder;
+  }
+
+  toggleGroupByFolder(): void {
+    this.data.groupByFolder = !this.data.groupByFolder;
   }
 
   setHideDailyNotes(hide: boolean): void {
@@ -224,7 +240,7 @@ export class NotebookStateManager {
   recordScrollAnchor(path: string, role: "current" | "next" | "held", anchor: PassageAnchor): void {
     const clean = cloneAnchor(anchor);
     this.data.positionsByPath[path] = clean;
-    if (role === "current" && this.data.current?.path === path) {
+    if (role !== "held" && this.data.current?.path === path) {
       this.data.current = { path, anchor: cloneAnchor(clean) };
     } else if (role === "held" && this.data.held?.path === path) {
       this.data.held = { path, anchor: cloneAnchor(clean) };

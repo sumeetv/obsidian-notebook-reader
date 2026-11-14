@@ -43,9 +43,16 @@ var NotebookReaderSettingTab = class extends import_obsidian.PluginSettingTab {
     const state = this.readerPlugin.getStateManager();
     const sequence = this.readerPlugin.getSequenceResult();
     new import_obsidian.Setting(containerEl).setName("Notebook Reader").setHeading();
-    new import_obsidian.Setting(containerEl).setName("Default note ordering within folders").setDesc("Folders always group notes together. Choose alphabetical or oldest-first chronological order within each folder.").addDropdown((dropdown) => {
+    new import_obsidian.Setting(containerEl).setName("Default note ordering").setDesc("Choose alphabetical or oldest-first chronological order (within folders when sectioned, or across all files).").addDropdown((dropdown) => {
       dropdown.addOption("alpha", "Alphabetical (A\u2013Z)").addOption("date", "Chronological (Oldest first)").setValue(state.sortOrder).onChange(async (value) => {
         state.setSortOrder(value === "date" ? "date" : "alpha");
+        await this.readerPlugin.persistState();
+        await this.readerPlugin.refreshOpenViews();
+      });
+    });
+    new import_obsidian.Setting(containerEl).setName("Section by folders").setDesc("Group notes by folder section dividers and edge tabs. Turn off to sort all included notes in one continuous list.").addToggle((toggle) => {
+      toggle.setValue(state.groupByFolder).onChange(async (value) => {
+        state.setGroupByFolder(value);
         await this.readerPlugin.persistState();
         await this.readerPlugin.refreshOpenViews();
       });
@@ -82,6 +89,7 @@ var NotebookReaderSettingTab = class extends import_obsidian.PluginSettingTab {
       button.setButtonText("Reset places").setWarning().onClick(async () => {
         const currentSettings = {
           sortOrder: state.sortOrder,
+          groupByFolder: state.groupByFolder,
           excludedFolders: [...state.excludedFolders],
           hideDailyNotes: state.hideDailyNotes
         };
@@ -118,6 +126,7 @@ function cloneAnchor(anchor) {
 function createDefaultPersistedData() {
   return {
     sortOrder: "alpha",
+    groupByFolder: true,
     excludedFolders: [],
     hideDailyNotes: true,
     indexOpen: false,
@@ -166,6 +175,7 @@ var NotebookStateManager = class {
     }
     this.data = {
       sortOrder,
+      groupByFolder: typeof raw.groupByFolder === "boolean" ? raw.groupByFolder : defaults.groupByFolder,
       excludedFolders,
       hideDailyNotes: typeof raw.hideDailyNotes === "boolean" ? raw.hideDailyNotes : defaults.hideDailyNotes,
       indexOpen: typeof raw.indexOpen === "boolean" ? raw.indexOpen : defaults.indexOpen,
@@ -179,6 +189,7 @@ var NotebookStateManager = class {
   getData() {
     return {
       sortOrder: this.data.sortOrder,
+      groupByFolder: this.data.groupByFolder,
       excludedFolders: [...this.data.excludedFolders],
       hideDailyNotes: this.data.hideDailyNotes,
       indexOpen: this.data.indexOpen,
@@ -193,6 +204,9 @@ var NotebookStateManager = class {
   }
   get sortOrder() {
     return this.data.sortOrder;
+  }
+  get groupByFolder() {
+    return this.data.groupByFolder;
   }
   get excludedFolders() {
     return this.data.excludedFolders;
@@ -217,6 +231,12 @@ var NotebookStateManager = class {
   }
   setSortOrder(order) {
     this.data.sortOrder = order;
+  }
+  setGroupByFolder(groupByFolder) {
+    this.data.groupByFolder = groupByFolder;
+  }
+  toggleGroupByFolder() {
+    this.data.groupByFolder = !this.data.groupByFolder;
   }
   setHideDailyNotes(hide) {
     this.data.hideDailyNotes = hide;
@@ -259,7 +279,7 @@ var NotebookStateManager = class {
   recordScrollAnchor(path, role, anchor) {
     const clean = cloneAnchor(anchor);
     this.data.positionsByPath[path] = clean;
-    if (role === "current" && this.data.current?.path === path) {
+    if (role !== "held" && this.data.current?.path === path) {
       this.data.current = { path, anchor: cloneAnchor(clean) };
     } else if (role === "held" && this.data.held?.path === path) {
       this.data.held = { path, anchor: cloneAnchor(clean) };
@@ -632,7 +652,7 @@ var FolioIndexPanel = class {
       heldItem.createSpan({ cls: "nb-folio-badge is-held", text: "Held" });
       heldItem.addEventListener("click", () => this.callbacks.onActivateHeld());
     }
-    if (model.sections.length === 0) {
+    if (model.sequence.length === 0) {
       const empty = listEl.createDiv({ cls: "nb-folio-empty" });
       empty.createDiv({ cls: "nb-folio-empty-title", text: "No notes in sequence" });
       empty.createDiv({
@@ -643,6 +663,43 @@ var FolioIndexPanel = class {
     }
     const currentPath = model.spread.left?.role === "current" ? model.spread.left.entry.path : model.spread.right?.role === "current" ? model.spread.right.entry.path : null;
     const heldPath = model.spread.heldEntry?.path ?? null;
+    const appendNoteRow = (parent, note, pageNumber, showFolder) => {
+      const isCurrent = currentPath === note.path;
+      const isHeld = heldPath === note.path;
+      const btn = parent.createEl("button", {
+        cls: "nb-folio-item",
+        type: "button",
+        attr: {
+          "data-note-path": note.path,
+          "aria-current": isCurrent ? "page" : "false"
+        }
+      });
+      btn.toggleClass("is-current", isCurrent);
+      btn.toggleClass("is-held", isHeld);
+      const itemMain = btn.createDiv({ cls: "nb-folio-item-main" });
+      itemMain.createDiv({ cls: "nb-folio-item-title", text: note.title });
+      itemMain.createDiv({
+        cls: "nb-folio-item-sub",
+        text: showFolder ? `${note.sectionLabel} \xB7 ${note.dateLabel} \xB7 p. ${pageNumber}` : `${note.dateLabel} \xB7 p. ${pageNumber}`
+      });
+      const badges = btn.createDiv({ cls: "nb-folio-badges" });
+      if (isCurrent) {
+        badges.createSpan({ cls: "nb-folio-badge is-current", text: "Current" });
+      }
+      if (isHeld) {
+        badges.createSpan({ cls: "nb-folio-badge is-held", text: "Held" });
+      }
+      btn.addEventListener("click", () => {
+        this.callbacks.onSelectNote(note.path);
+      });
+    };
+    if (!model.groupByFolder) {
+      const flatGroup = listEl.createDiv({ cls: "nb-folio-section is-flat" });
+      model.sequence.forEach((note, index) => {
+        appendNoteRow(flatGroup, note, index + 1, true);
+      });
+      return;
+    }
     let runningNumber = 0;
     for (const section of model.sections) {
       const groupEl = listEl.createDiv({ cls: "nb-folio-section" });
@@ -654,34 +711,7 @@ var FolioIndexPanel = class {
       });
       for (const note of section.notes) {
         runningNumber += 1;
-        const isCurrent = currentPath === note.path;
-        const isHeld = heldPath === note.path;
-        const btn = groupEl.createEl("button", {
-          cls: "nb-folio-item",
-          type: "button",
-          attr: {
-            "data-note-path": note.path,
-            "aria-current": isCurrent ? "page" : "false"
-          }
-        });
-        btn.toggleClass("is-current", isCurrent);
-        btn.toggleClass("is-held", isHeld);
-        const itemMain = btn.createDiv({ cls: "nb-folio-item-main" });
-        itemMain.createDiv({ cls: "nb-folio-item-title", text: note.title });
-        itemMain.createDiv({
-          cls: "nb-folio-item-sub",
-          text: `${note.dateLabel} \xB7 p. ${runningNumber}`
-        });
-        const badges = btn.createDiv({ cls: "nb-folio-badges" });
-        if (isCurrent) {
-          badges.createSpan({ cls: "nb-folio-badge is-current", text: "Current" });
-        }
-        if (isHeld) {
-          badges.createSpan({ cls: "nb-folio-badge is-held", text: "Held" });
-        }
-        btn.addEventListener("click", () => {
-          this.callbacks.onSelectNote(note.path);
-        });
+        appendNoteRow(groupEl, note, runningNumber, false);
       }
     }
   }
@@ -902,6 +932,7 @@ function compareNotesWithinFolder(a, b, sortOrder) {
   return compareStringsNatural(a.path, b.path);
 }
 function buildNotebookSequence(sources, options) {
+  const groupByFolder = options.groupByFolder ?? true;
   const allEntries = sources.map(resolveNoteEntry);
   const allEntriesByPath = /* @__PURE__ */ new Map();
   for (const entry of allEntries) {
@@ -932,6 +963,27 @@ function buildNotebookSequence(sources, options) {
   });
   const sequence = [];
   const sections = [];
+  if (!groupByFolder) {
+    for (const entry of allEntries) {
+      const isDailyFolder = dailyFolders.has(entry.folderPath);
+      if (isFolderExcluded(entry.folderPath, options.excludedFolders)) {
+        continue;
+      }
+      if (options.hideDailyNotes && isDailyFolder) {
+        continue;
+      }
+      sequence.push(entry);
+    }
+    sequence.sort((a, b) => compareNotesWithinFolder(a, b, options.sortOrder));
+    return {
+      allEntries,
+      allEntriesByPath,
+      sequence,
+      sections,
+      folders,
+      dailyFolders
+    };
+  }
   for (const folderPath of sortedFolderPaths) {
     const isDailyFolder = dailyFolders.has(folderPath);
     if (isFolderExcluded(folderPath, options.excludedFolders)) {
@@ -978,6 +1030,7 @@ var ThumbEdgeController = class {
     this.previewTitleEl = null;
     this.previewMetaEl = null;
     this.tabsEl = null;
+    this.tabTooltipEl = null;
     this.model = {
       sequence: [],
       sections: [],
@@ -995,6 +1048,8 @@ var ThumbEdgeController = class {
     this.activePointerId = null;
     this.isHovering = false;
     this.previewIndex = null;
+    this.longPressTimer = null;
+    this.longPressTriggered = false;
     this.cleanups = [];
     this.hostEl = hostEl;
     this.callbacks = callbacks;
@@ -1046,10 +1101,21 @@ var ThumbEdgeController = class {
       cls: "nb-edge-tabs",
       attr: { role: "navigation", "aria-label": "Folder sections" }
     });
+    this.tabTooltipEl = this.rootEl.createDiv({
+      cls: "nb-folder-tab-tooltip",
+      attr: { role: "tooltip", hidden: "true" }
+    });
     this.bindEvents();
   }
   bindEvents() {
     if (!this.trackEl || !this.heldMarkerBtn) return;
+    const onTabsScroll = () => {
+      this.hideTabTooltip();
+    };
+    this.tabsEl?.addEventListener("scroll", onTabsScroll, { passive: true });
+    this.cleanups.push(() => {
+      this.tabsEl?.removeEventListener("scroll", onTabsScroll);
+    });
     const onHeldClick = (e) => {
       e.stopPropagation();
       this.callbacks.onActivateHeld();
@@ -1227,6 +1293,34 @@ var ThumbEdgeController = class {
     this.thumbEl?.removeClass("is-active");
     this.syncMarkers();
   }
+  clearLongPressTimer() {
+    if (this.longPressTimer !== null) {
+      window.clearTimeout(this.longPressTimer);
+      this.longPressTimer = null;
+    }
+  }
+  showTabTooltip(section, tabBtn) {
+    if (!this.tabTooltipEl || !this.rootEl) return;
+    this.tabTooltipEl.setText(section.sectionLabel);
+    this.tabTooltipEl.setAttr("data-tooltip-folder", section.folderPath);
+    this.tabTooltipEl.removeAttribute("hidden");
+    const shellRect = this.rootEl.getBoundingClientRect();
+    const tabRect = tabBtn.getBoundingClientRect();
+    let centerTop = 24;
+    if (shellRect.height > 0 && tabRect.height > 0) {
+      centerTop = tabRect.top - shellRect.top + tabRect.height / 2;
+      centerTop = Math.max(20, Math.min(shellRect.height - 20, centerTop));
+    } else if (tabBtn.offsetHeight > 0) {
+      centerTop = tabBtn.offsetTop + tabBtn.offsetHeight / 2;
+    }
+    this.tabTooltipEl.style.top = `${Math.round(centerTop)}px`;
+  }
+  hideTabTooltip() {
+    this.clearLongPressTimer();
+    if (!this.tabTooltipEl) return;
+    this.tabTooltipEl.setAttr("hidden", "true");
+    this.tabTooltipEl.removeAttribute("data-tooltip-folder");
+  }
   update(model) {
     this.model = model;
     this.renderTabs();
@@ -1285,11 +1379,14 @@ var ThumbEdgeController = class {
   }
   renderTabs() {
     if (!this.tabsEl) return;
+    this.hideTabTooltip();
     this.tabsEl.empty();
     const activeFolder = this.model.spread.left?.role === "current" ? this.model.spread.left.entry.folderPath : this.model.spread.right?.role === "current" ? this.model.spread.right.entry.folderPath : null;
     if (this.model.sections.length === 0) {
+      this.tabsEl.setAttr("hidden", "true");
       return;
     }
+    this.tabsEl.removeAttribute("hidden");
     for (const section of this.model.sections) {
       const isCurrentFolder = activeFolder === section.folderPath;
       const tabBtn = this.tabsEl.createEl("button", {
@@ -1298,18 +1395,75 @@ var ThumbEdgeController = class {
         attr: {
           "data-folder-path": section.folderPath,
           "aria-pressed": isCurrentFolder ? "true" : "false",
-          title: `${section.sectionLabel} (${section.notes.length})`
+          "aria-label": `${section.sectionLabel} (${section.notes.length})`,
+          title: section.sectionLabel
         }
       });
       tabBtn.toggleClass("is-active", isCurrentFolder);
       tabBtn.createSpan({ cls: "nb-folder-tab-label", text: section.tabLabel });
       tabBtn.createSpan({ cls: "nb-folder-tab-count", text: String(section.notes.length) });
-      tabBtn.addEventListener("click", () => {
+      let pressStartX = 0;
+      let pressStartY = 0;
+      tabBtn.addEventListener("mouseenter", () => {
+        this.showTabTooltip(section, tabBtn);
+      });
+      tabBtn.addEventListener("focus", () => {
+        this.showTabTooltip(section, tabBtn);
+      });
+      tabBtn.addEventListener("mouseleave", () => {
+        this.hideTabTooltip();
+      });
+      tabBtn.addEventListener("blur", () => {
+        this.hideTabTooltip();
+      });
+      tabBtn.addEventListener("pointerdown", (e) => {
+        this.longPressTriggered = false;
+        if (e.pointerType === "mouse") return;
+        pressStartX = e.clientX;
+        pressStartY = e.clientY;
+        this.clearLongPressTimer();
+        this.longPressTimer = window.setTimeout(() => {
+          this.longPressTimer = null;
+          this.longPressTriggered = true;
+          this.showTabTooltip(section, tabBtn);
+        }, 420);
+      });
+      tabBtn.addEventListener("pointermove", (e) => {
+        if (this.longPressTimer === null) return;
+        if (Math.hypot(e.clientX - pressStartX, e.clientY - pressStartY) > 10) {
+          this.clearLongPressTimer();
+        }
+      });
+      tabBtn.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        this.longPressTriggered = true;
+        this.showTabTooltip(section, tabBtn);
+      });
+      tabBtn.addEventListener("pointerup", (e) => {
+        this.clearLongPressTimer();
+        if (e.pointerType !== "mouse") {
+          this.hideTabTooltip();
+        }
+      });
+      tabBtn.addEventListener("pointercancel", (e) => {
+        this.clearLongPressTimer();
+        if (e.pointerType !== "mouse") {
+          this.hideTabTooltip();
+        }
+      });
+      tabBtn.addEventListener("click", (e) => {
+        if (this.longPressTriggered) {
+          this.longPressTriggered = false;
+          e.preventDefault();
+          return;
+        }
+        this.hideTabTooltip();
         this.callbacks.onSelectFolder(section.folderPath);
       });
     }
   }
   destroy() {
+    this.hideTabTooltip();
     for (const cleanup of this.cleanups) {
       cleanup();
     }
@@ -1499,6 +1653,22 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
       text: "Date",
       attr: { "data-sort": "date", "aria-pressed": "false" }
     });
+    const groupModeBar = topControls.createDiv({
+      cls: "nb-segmented",
+      attr: { role: "group", "aria-label": "Notebook grouping" }
+    });
+    this.groupByFolderBtn = groupModeBar.createEl("button", {
+      cls: "nb-seg-btn",
+      type: "button",
+      text: "By folder",
+      attr: { "data-group-mode": "folders", "aria-pressed": "true" }
+    });
+    this.groupFlatBtn = groupModeBar.createEl("button", {
+      cls: "nb-seg-btn",
+      type: "button",
+      text: "All files",
+      attr: { "data-group-mode": "all", "aria-pressed": "false" }
+    });
     const folderMenuWrap = topControls.createDiv({ cls: "nb-folder-menu-wrap" });
     this.foldersBtn = folderMenuWrap.createEl("button", {
       cls: "nb-top-btn nb-folders-btn",
@@ -1596,7 +1766,14 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
     const roleBadgeEl = metaLeft.createSpan({ cls: "nb-role-badge" });
     const folderLabelEl = metaLeft.createSpan({ cls: "nb-page-folder-pill" });
     const dateLabelEl = metaLeft.createSpan({ cls: "nb-page-date-label" });
-    const pinBtn = headerEl.createEl("button", {
+    const headerActions = headerEl.createDiv({ cls: "nb-page-header-actions" });
+    const fileLinkBtn = headerActions.createEl("button", {
+      cls: "nb-page-file-link",
+      type: "button",
+      text: "",
+      attr: { title: "Open note in a new tab to view or edit" }
+    });
+    const pinBtn = headerActions.createEl("button", {
       cls: "nb-pane-pin-btn",
       type: "button",
       text: side === "left" ? "Hold left" : "Hold right",
@@ -1610,18 +1787,26 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
     const titleEl = articleEl.createEl("h1", { cls: "nb-page-title" });
     const markdownEl = articleEl.createDiv({ cls: "nb-page-markdown markdown-rendered" });
     const footerMetaEl = articleEl.createDiv({ cls: "nb-page-footer-meta" });
+    const footerFileBtn = footerMetaEl.createEl("button", {
+      cls: "nb-page-footer-file-link",
+      type: "button",
+      text: "",
+      attr: { title: "Open note in a new tab to view or edit" }
+    });
     return {
       paneEl,
       headerEl,
       roleBadgeEl,
       folderLabelEl,
       dateLabelEl,
+      fileLinkBtn,
       pinBtn,
       scrollEl,
       articleEl,
       titleEl,
       markdownEl,
-      footerMetaEl
+      footerMetaEl,
+      footerFileBtn
     };
   }
   mountRightRail() {
@@ -1653,6 +1838,8 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
   bindInteractions() {
     this.registerDomEvent(this.sortAlphaBtn, "click", () => void this.setSortOrder("alpha"));
     this.registerDomEvent(this.sortDateBtn, "click", () => void this.setSortOrder("date"));
+    this.registerDomEvent(this.groupByFolderBtn, "click", () => void this.setGroupByFolder(true));
+    this.registerDomEvent(this.groupFlatBtn, "click", () => void this.setGroupByFolder(false));
     this.registerDomEvent(this.foldersBtn, "click", (e) => {
       e.stopPropagation();
       this.toggleFolderPopover();
@@ -1683,6 +1870,10 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
     this.registerDomEvent(this.holdRightBtn, "click", () => void this.holdSide("right"));
     this.registerDomEvent(this.leftPane.pinBtn, "click", () => void this.holdSide("left"));
     this.registerDomEvent(this.rightPane.pinBtn, "click", () => void this.holdSide("right"));
+    this.registerDomEvent(this.leftPane.fileLinkBtn, "click", () => void this.openNoteInNewTab("left"));
+    this.registerDomEvent(this.rightPane.fileLinkBtn, "click", () => void this.openNoteInNewTab("right"));
+    this.registerDomEvent(this.leftPane.footerFileBtn, "click", () => void this.openNoteInNewTab("left"));
+    this.registerDomEvent(this.rightPane.footerFileBtn, "click", () => void this.openNoteInNewTab("right"));
     this.registerDomEvent(this.consecutiveBtn, "click", () => void this.returnToConsecutive());
     this.registerDomEvent(this.swapBtn, "click", () => void this.swapHeldAndCurrent());
     this.registerDomEvent(this.compareBtn, "click", () => void this.toggleCompare());
@@ -1807,6 +1998,17 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
     await this.refresh({ forcePaneRerender: false });
     await this.host.persistState();
   }
+  async setGroupByFolder(groupByFolder) {
+    const state = this.host.getStateManager();
+    if (state.groupByFolder === groupByFolder) return;
+    this.snapshotLiveAnchors();
+    state.setGroupByFolder(groupByFolder);
+    await this.refresh({ forcePaneRerender: false });
+    if (this.folderPopoverOpen && this.lastSequence) {
+      this.syncFolderPopoverState(this.lastSequence.folders);
+    }
+    await this.host.persistState();
+  }
   async setIndexOpen(open) {
     const state = this.host.getStateManager();
     if (state.indexOpen === open) return;
@@ -1833,12 +2035,27 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
   }
   renderFolderPopover(folders) {
     const state = this.host.getStateManager();
+    const prevListEl = this.folderPopoverEl.querySelector(".nb-popover-folder-list");
+    const prevScrollTop = prevListEl ? prevListEl.scrollTop : 0;
     this.folderPopoverEl.empty();
     const header = this.folderPopoverEl.createDiv({ cls: "nb-popover-header" });
     header.createSpan({ cls: "nb-popover-title", text: "Sections & exclusions" });
+    const groupToggleLabel = this.folderPopoverEl.createEl("label", {
+      cls: "nb-popover-row is-group-toggle"
+    });
+    const groupCheckbox = groupToggleLabel.createEl("input", {
+      type: "checkbox",
+      attr: { "data-popover-role": "group-by-folder" }
+    });
+    groupCheckbox.checked = state.groupByFolder;
+    groupToggleLabel.createSpan({ text: "Section by folders" });
+    groupCheckbox.addEventListener("change", () => {
+      void this.setGroupByFolder(groupCheckbox.checked);
+    });
     const dailyToggleLabel = this.folderPopoverEl.createEl("label", { cls: "nb-popover-row is-daily-toggle" });
     const dailyCheckbox = dailyToggleLabel.createEl("input", {
-      type: "checkbox"
+      type: "checkbox",
+      attr: { "data-popover-role": "include-daily" }
     });
     dailyCheckbox.checked = !state.hideDailyNotes;
     dailyToggleLabel.createSpan({ text: "Include daily-note folders" });
@@ -1848,7 +2065,10 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
     const listEl = this.folderPopoverEl.createDiv({ cls: "nb-popover-folder-list" });
     for (const folder of folders) {
       const row = listEl.createEl("label", { cls: "nb-popover-row" });
-      const checkbox = row.createEl("input", { type: "checkbox" });
+      const checkbox = row.createEl("input", {
+        type: "checkbox",
+        attr: { "data-popover-folder": folder.folderPath }
+      });
       const isExcludedExplicitly = state.excludedFolders.includes(folder.folderPath);
       const disabledByDaily = state.hideDailyNotes && folder.isDailyFolder;
       checkbox.checked = !isExcludedExplicitly && !disabledByDaily;
@@ -1862,13 +2082,44 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
         void this.toggleFolderInclusion(folder.folderPath);
       });
     }
+    if (prevScrollTop > 0) {
+      listEl.scrollTop = prevScrollTop;
+    }
+  }
+  syncFolderPopoverState(folders) {
+    const state = this.host.getStateManager();
+    const existingRows = this.folderPopoverEl.querySelectorAll("input[data-popover-folder]");
+    if (existingRows.length !== folders.length) {
+      this.renderFolderPopover(folders);
+      return;
+    }
+    const groupCheckbox = this.folderPopoverEl.querySelector(
+      'input[data-popover-role="group-by-folder"]'
+    );
+    if (groupCheckbox) {
+      groupCheckbox.checked = state.groupByFolder;
+    }
+    const dailyCheckbox = this.folderPopoverEl.querySelector(
+      'input[data-popover-role="include-daily"]'
+    );
+    if (dailyCheckbox) {
+      dailyCheckbox.checked = !state.hideDailyNotes;
+    }
+    existingRows.forEach((checkbox, idx) => {
+      const folder = folders[idx];
+      if (!folder) return;
+      const isExcludedExplicitly = state.excludedFolders.includes(folder.folderPath);
+      const disabledByDaily = state.hideDailyNotes && folder.isDailyFolder;
+      checkbox.checked = !isExcludedExplicitly && !disabledByDaily;
+      checkbox.disabled = disabledByDaily;
+    });
   }
   async toggleIncludeDailyNotes(includeDaily) {
     this.snapshotLiveAnchors();
     this.host.getStateManager().setHideDailyNotes(!includeDaily);
     await this.refresh({ forcePaneRerender: false });
     if (this.folderPopoverOpen && this.lastSequence) {
-      this.renderFolderPopover(this.lastSequence.folders);
+      this.syncFolderPopoverState(this.lastSequence.folders);
     }
     await this.host.persistState();
   }
@@ -1877,9 +2128,21 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
     this.host.getStateManager().toggleFolderExclusion(folderPath);
     await this.refresh({ forcePaneRerender: false });
     if (this.folderPopoverOpen && this.lastSequence) {
-      this.renderFolderPopover(this.lastSequence.folders);
+      this.syncFolderPopoverState(this.lastSequence.folders);
     }
     await this.host.persistState();
+  }
+  async openNoteInNewTab(side) {
+    const desc = this.currentDescriptors[side];
+    if (!desc) return;
+    const abstractFile = this.app.vault.getAbstractFileByPath(desc.entry.path);
+    if (!(abstractFile instanceof import_obsidian2.TFile)) {
+      new import_obsidian2.Notice("Note file could not be found in vault.");
+      return;
+    }
+    const leaf = this.app.workspace.getLeaf("tab");
+    await leaf.openFile(abstractFile);
+    this.app.workspace.revealLeaf(leaf);
   }
   async navigateToNote(path) {
     this.snapshotLiveAnchors();
@@ -1974,6 +2237,10 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
     this.sortAlphaBtn.setAttr("aria-pressed", state.sortOrder === "alpha" ? "true" : "false");
     this.sortDateBtn.toggleClass("is-active", state.sortOrder === "date");
     this.sortDateBtn.setAttr("aria-pressed", state.sortOrder === "date" ? "true" : "false");
+    this.groupByFolderBtn.toggleClass("is-active", state.groupByFolder);
+    this.groupByFolderBtn.setAttr("aria-pressed", state.groupByFolder ? "true" : "false");
+    this.groupFlatBtn.toggleClass("is-active", !state.groupByFolder);
+    this.groupFlatBtn.setAttr("aria-pressed", !state.groupByFolder ? "true" : "false");
     const hiddenCount = seqResult.folders.filter((f) => f.isExcluded).length;
     this.foldersBtn.setText(hiddenCount > 0 ? `Folders (${hiddenCount} hidden) \u25BE` : "Folders \u25BE");
     this.indexToggleBtn.toggleClass("is-active", state.indexOpen);
@@ -1986,7 +2253,12 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
     this.currentDescriptors.left = spread.left;
     this.currentDescriptors.right = spread.right;
     if (state.indexOpen && this.folioIndex) {
-      this.folioIndex.render({ sections: seqResult.sections, spread });
+      this.folioIndex.render({
+        sequence: seqResult.sequence,
+        sections: seqResult.sections,
+        groupByFolder: state.groupByFolder,
+        spread
+      });
     } else if (!state.indexOpen && this.thumbEdge) {
       this.thumbEdge.update({
         sequence: seqResult.sequence,
@@ -2052,6 +2324,9 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
       pane.roleBadgeEl.setText("");
       pane.folderLabelEl.setText("");
       pane.dateLabelEl.setText("");
+      pane.fileLinkBtn.setText("");
+      pane.fileLinkBtn.disabled = true;
+      pane.fileLinkBtn.setAttr("hidden", "true");
       pane.pinBtn.disabled = true;
       pane.pinBtn.setAttr("aria-pressed", "false");
       pane.titleEl.setText("");
@@ -2078,7 +2353,9 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
           text: "You have reached the final note in the current sequence."
         });
       }
-      pane.footerMetaEl.setText("");
+      pane.footerFileBtn.setText("");
+      pane.footerFileBtn.disabled = true;
+      pane.footerFileBtn.setAttr("hidden", "true");
       pane.scrollEl.scrollTop = 0;
       return;
     }
@@ -2093,6 +2370,14 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
       descriptor.isOutsideFilter ? `${descriptor.entry.sectionLabel} \xB7 Outside current filter` : descriptor.entry.sectionLabel
     );
     pane.dateLabelEl.setText(descriptor.entry.dateLabel);
+    pane.fileLinkBtn.removeAttribute("hidden");
+    pane.fileLinkBtn.disabled = false;
+    pane.fileLinkBtn.setText(`${descriptor.entry.basename}.md \u2197`);
+    pane.fileLinkBtn.setAttr("data-open-file", descriptor.entry.path);
+    pane.fileLinkBtn.setAttr(
+      "title",
+      `Open ${descriptor.entry.path} in a new tab to view or edit`
+    );
     pane.pinBtn.disabled = false;
     pane.pinBtn.setText(descriptor.isPinned ? "Pinned \u2713" : side === "left" ? "Hold left" : "Hold right");
     pane.pinBtn.setAttr("aria-pressed", descriptor.isPinned ? "true" : "false");
@@ -2100,7 +2385,11 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
     const invalidated = options.invalidatedPaths?.has(descriptor.entry.path) ?? false;
     const sameNoteAndMtime = !options.forcePaneRerender && !invalidated && prevRendered && prevRendered.path === descriptor.entry.path && prevRendered.mtime === descriptor.entry.mtime;
     if (sameNoteAndMtime) {
-      this.applyPaneScrollRestore(side, pane.scrollEl, descriptor.anchor);
+      const roleChanged = prevRendered.role !== descriptor.role;
+      prevRendered.role = descriptor.role;
+      if (roleChanged) {
+        this.applyPaneScrollRestore(side, pane.scrollEl, descriptor.anchor);
+      }
       return;
     }
     const renderSeq = ++this.renderCounter;
@@ -2112,12 +2401,16 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
     this.renderedPanes[side] = {
       path: descriptor.entry.path,
       mtime: descriptor.entry.mtime,
+      role: descriptor.role,
       component: childComponent,
       renderSeq
     };
     pane.titleEl.setText(descriptor.entry.title);
     pane.markdownEl.empty();
-    pane.footerMetaEl.setText(descriptor.entry.path);
+    pane.footerFileBtn.removeAttribute("hidden");
+    pane.footerFileBtn.disabled = false;
+    pane.footerFileBtn.setText(`${descriptor.entry.path} \u2197`);
+    pane.footerFileBtn.setAttr("data-open-file", descriptor.entry.path);
     const abstractFile = this.app.vault.getAbstractFileByPath(descriptor.entry.path);
     if (!(abstractFile instanceof import_obsidian2.TFile)) {
       pane.markdownEl.createDiv({
@@ -2164,6 +2457,7 @@ function buildVaultSequence(app, state) {
   }));
   return buildNotebookSequence(sources, {
     sortOrder: state.sortOrder,
+    groupByFolder: state.groupByFolder,
     excludedFolders: state.excludedFolders,
     hideDailyNotes: state.hideDailyNotes
   });

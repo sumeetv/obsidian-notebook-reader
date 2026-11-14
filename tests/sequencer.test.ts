@@ -185,4 +185,41 @@ describe("buildNotebookSequence", () => {
       "Logs/Summary.md",
     ]);
   });
+
+  it("supports flat global A-Z and Date sorting without folder sectioning while honoring exclusions", () => {
+    const sources = makeSources([
+      { path: "Walks/Alpha walk.md", content: "---\ndate: 2026-01-05\n---\nWalk" },
+      { path: "Ideas/Zeta idea.md", content: "---\ndate: 2026-01-01\n---\nIdea" },
+      { path: "Reading/Middle book.md", content: "---\ndate: 2026-01-03\n---\nBook" },
+      { path: "Journal/2026-01-02.md", content: "Daily note" },
+    ]);
+
+    const flatAlpha = buildNotebookSequence(sources, {
+      sortOrder: "alpha",
+      groupByFolder: false,
+      excludedFolders: [],
+      hideDailyNotes: true,
+    });
+
+    expect(flatAlpha.sections).toEqual([]);
+    expect(flatAlpha.sequence.map((n) => n.path)).toEqual([
+      "Walks/Alpha walk.md",
+      "Reading/Middle book.md",
+      "Ideas/Zeta idea.md",
+    ]);
+
+    const flatDate = buildNotebookSequence(sources, {
+      sortOrder: "date",
+      groupByFolder: false,
+      excludedFolders: [],
+      hideDailyNotes: true,
+    });
+
+    expect(flatDate.sections).toEqual([]);
+    expect(flatDate.sequence.map((n) => n.path)).toEqual([
+      "Ideas/Zeta idea.md",
+      "Reading/Middle book.md",
+      "Walks/Alpha walk.md",
+    ]);
+  });
 });

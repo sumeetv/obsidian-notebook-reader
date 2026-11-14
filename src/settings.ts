@@ -19,8 +19,8 @@ export class NotebookReaderSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("Notebook Reader").setHeading();
 
     new Setting(containerEl)
-      .setName("Default note ordering within folders")
-      .setDesc("Folders always group notes together. Choose alphabetical or oldest-first chronological order within each folder.")
+      .setName("Default note ordering")
+      .setDesc("Choose alphabetical or oldest-first chronological order (within folders when sectioned, or across all files).")
       .addDropdown((dropdown) => {
         dropdown
           .addOption("alpha", "Alphabetical (A–Z)")
@@ -31,6 +31,17 @@ export class NotebookReaderSettingTab extends PluginSettingTab {
             await this.readerPlugin.persistState();
             await this.readerPlugin.refreshOpenViews();
           });
+      });
+
+    new Setting(containerEl)
+      .setName("Section by folders")
+      .setDesc("Group notes by folder section dividers and edge tabs. Turn off to sort all included notes in one continuous list.")
+      .addToggle((toggle) => {
+        toggle.setValue(state.groupByFolder).onChange(async (value) => {
+          state.setGroupByFolder(value);
+          await this.readerPlugin.persistState();
+          await this.readerPlugin.refreshOpenViews();
+        });
       });
 
     new Setting(containerEl)
@@ -83,6 +94,7 @@ export class NotebookReaderSettingTab extends PluginSettingTab {
           .onClick(async () => {
             const currentSettings = {
               sortOrder: state.sortOrder,
+              groupByFolder: state.groupByFolder,
               excludedFolders: [...state.excludedFolders],
               hideDailyNotes: state.hideDailyNotes,
             };

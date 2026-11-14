@@ -68,6 +68,7 @@ export interface PassageRef {
 
 export interface NotebookPersistedData {
   sortOrder: SortOrder;
+  groupByFolder: boolean;
   excludedFolders: string[];
   hideDailyNotes: boolean;
   indexOpen: boolean;
