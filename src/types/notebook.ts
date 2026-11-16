@@ -4,6 +4,8 @@ export type SpreadMode = "consecutive" | "pinned-left" | "pinned-right" | "compa
 
 export type PaneSide = "left" | "right";
 
+export type NavButtonPosition = "right" | "left";
+
 export interface NoteEntry {
   /** Normalized vault-relative path, e.g. "Ideas/Attention is a material.md" or "Welcome.md" */
   path: string;
@@ -74,6 +76,7 @@ export interface NotebookPersistedData {
   indexOpen: boolean;
   spreadMode: SpreadMode;
   narrowActiveSlot: PaneSide;
+  navButtonPosition: NavButtonPosition;
   current: PassageRef | null;
   held: PassageRef | null;
   positionsByPath: Record<string, PassageAnchor>;

@@ -56,6 +56,21 @@ export class NotebookReaderSettingTab extends PluginSettingTab {
         });
       });
 
+    new Setting(containerEl)
+      .setName("Page navigation buttons")
+      .setDesc("Choose whether Previous and Next page buttons appear on the bottom right or bottom left.")
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOption("right", "Bottom right (Default)")
+          .addOption("left", "Bottom left (Left-handed)")
+          .setValue(state.navButtonPosition)
+          .onChange(async (value) => {
+            state.setNavButtonPosition(value === "left" ? "left" : "right");
+            await this.readerPlugin.persistState();
+            await this.readerPlugin.refreshOpenViews();
+          });
+      });
+
     new Setting(containerEl).setName("Folder exclusions").setHeading();
 
     for (const folder of sequence.folders) {
@@ -97,6 +112,7 @@ export class NotebookReaderSettingTab extends PluginSettingTab {
               groupByFolder: state.groupByFolder,
               excludedFolders: [...state.excludedFolders],
               hideDailyNotes: state.hideDailyNotes,
+              navButtonPosition: state.navButtonPosition,
             };
             state.hydrate(currentSettings);
             await this.readerPlugin.persistState();

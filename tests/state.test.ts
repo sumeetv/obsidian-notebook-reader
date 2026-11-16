@@ -112,17 +112,28 @@ describe("NotebookStateManager", () => {
       blockOffsetRatio: 0.5,
     });
 
-    // Switch to compare mode
+    // Switch to compare mode from consecutive when held (A) is not visible on left (G) ->
+    // keeps current (G) on the left and renders held (A) on the right
     state.returnToConsecutive(seq.sequence);
     state.toggleCompare(seq.sequence, seq.allEntriesByPath);
     let spread = state.getSpread(seq.sequence, seq.allEntriesByPath);
     expect(spread.mode).toBe("compare");
+    expect(spread.left?.entry.path).toBe("Reading/G.md");
+    expect(spread.left?.anchor.scrollTop).toBe(520);
+    expect(spread.left?.isPinned).toBe(false);
+    expect(spread.right?.entry.path).toBe("Ideas/A.md");
+    expect(spread.right?.anchor.scrollTop).toBe(310);
+    expect(spread.right?.isPinned).toBe(true);
+
+    // Swap once -> current becomes A (310) on left, held becomes G (520) on right
+    state.swapHeldAndCurrent(seq.allEntriesByPath);
+    spread = state.getSpread(seq.sequence, seq.allEntriesByPath);
     expect(spread.left?.entry.path).toBe("Ideas/A.md");
     expect(spread.left?.anchor.scrollTop).toBe(310);
     expect(spread.right?.entry.path).toBe("Reading/G.md");
     expect(spread.right?.anchor.scrollTop).toBe(520);
 
-    // Swap once -> held becomes G (520), current becomes A (310)
+    // Swap again -> toggles cleanly back
     state.swapHeldAndCurrent(seq.allEntriesByPath);
     spread = state.getSpread(seq.sequence, seq.allEntriesByPath);
     expect(spread.left?.entry.path).toBe("Reading/G.md");
@@ -130,13 +141,23 @@ describe("NotebookStateManager", () => {
     expect(spread.right?.entry.path).toBe("Ideas/A.md");
     expect(spread.right?.anchor.scrollTop).toBe(310);
 
-    // Swap again -> toggles cleanly back
-    state.swapHeldAndCurrent(seq.allEntriesByPath);
+    // Exiting compare mode keeps G on the left; if held (A) is already on the left (e.g. pinned-left),
+    // entering compare keeps A on the left and G on the right
+    state.toggleCompare(seq.sequence, seq.allEntriesByPath);
     spread = state.getSpread(seq.sequence, seq.allEntriesByPath);
+    expect(spread.mode).toBe("consecutive");
+    expect(spread.left?.entry.path).toBe("Reading/G.md");
+
+    state.navigateToNote("Ideas/A.md", seq.sequence);
+    state.holdVisibleSide("left", seq.sequence, seq.allEntriesByPath);
+    state.navigateToNote("Reading/G.md", seq.sequence);
+    state.toggleCompare(seq.sequence, seq.allEntriesByPath);
+    spread = state.getSpread(seq.sequence, seq.allEntriesByPath);
+    expect(spread.mode).toBe("compare");
     expect(spread.left?.entry.path).toBe("Ideas/A.md");
-    expect(spread.left?.anchor.scrollTop).toBe(310);
+    expect(spread.left?.isPinned).toBe(true);
     expect(spread.right?.entry.path).toBe("Reading/G.md");
-    expect(spread.right?.anchor.scrollTop).toBe(520);
+    expect(spread.right?.isPinned).toBe(false);
   });
 
   it("preserves an existing held reference when its folder is excluded and marks it outside filter", () => {
@@ -194,5 +215,129 @@ describe("NotebookStateManager", () => {
     state.handleDelete("Ideas/A-renamed.md", remaining);
     expect(state.held).toBeNull();
     expect(state.spreadMode).toBe("consecutive");
+  });
+
+  it("keeps the left page as current when unpinning the left page or clearing held", () => {
+    const seq = setupSequence(true);
+    const state = new NotebookStateManager();
+    state.reconcile(seq.sequence, seq.allEntriesByPath);
+
+    state.recordScrollAnchor("Ideas/A.md", "current", {
+      scrollTop: 240,
+      scrollRatio: 0.4,
+      blockIndex: 3,
+      blockOffsetRatio: 0.2,
+    });
+
+    // Pin left page on [Ideas/A.md, Ideas/B.md], then unpin it -> keeps [Ideas/A.md, Ideas/B.md]
+    state.holdVisibleSide("left", seq.sequence, seq.allEntriesByPath);
+    expect(state.spreadMode).toBe("pinned-left");
+    expect(state.narrowActiveSlot).toBe("right");
+
+    state.holdVisibleSide("left", seq.sequence, seq.allEntriesByPath);
+    let spread = state.getSpread(seq.sequence, seq.allEntriesByPath);
+    expect(spread.mode).toBe("consecutive");
+    expect(state.narrowActiveSlot).toBe("left");
+    expect(spread.left?.entry.path).toBe("Ideas/A.md");
+    expect(spread.left?.anchor.scrollTop).toBe(240);
+    expect(spread.right?.entry.path).toBe("Ideas/B.md");
+
+    // Pin left, browse right away to Ideas/C.md, then clearHeld(seq.sequence) -> restores Ideas/A.md
+    state.holdVisibleSide("left", seq.sequence, seq.allEntriesByPath);
+    state.step(1, seq.sequence);
+    expect(state.getSpread(seq.sequence, seq.allEntriesByPath).right?.entry.path).toBe("Ideas/C.md");
+
+    state.clearHeld(seq.sequence);
+    spread = state.getSpread(seq.sequence, seq.allEntriesByPath);
+    expect(spread.mode).toBe("consecutive");
+    expect(state.narrowActiveSlot).toBe("left");
+    expect(state.held).toBeNull();
+    expect(spread.left?.entry.path).toBe("Ideas/A.md");
+    expect(spread.left?.anchor.scrollTop).toBe(240);
+    expect(spread.right?.entry.path).toBe("Ideas/B.md");
+
+    // In compare mode with held on the left (left = Ideas/A.md, right = Reading/G.md),
+    // unpinning left via holdVisibleSide and clearing held via clearHeld both preserve Ideas/A.md as current
+    state.recordScrollAnchor("Ideas/A.md", "current", {
+      scrollTop: 310,
+      scrollRatio: 0.5,
+      blockIndex: 4,
+      blockOffsetRatio: 0.1,
+    });
+    state.holdVisibleSide("left", seq.sequence, seq.allEntriesByPath);
+    state.navigateToNote("Reading/G.md", seq.sequence);
+    state.toggleCompare(seq.sequence, seq.allEntriesByPath);
+    expect(state.spreadMode).toBe("compare");
+    expect(state.getSpread(seq.sequence, seq.allEntriesByPath).left?.entry.path).toBe("Ideas/A.md");
+
+    state.holdVisibleSide("left", seq.sequence, seq.allEntriesByPath);
+    spread = state.getSpread(seq.sequence, seq.allEntriesByPath);
+    expect(spread.mode).toBe("consecutive");
+    expect(state.narrowActiveSlot).toBe("left");
+    expect(spread.left?.entry.path).toBe("Ideas/A.md");
+    expect(spread.left?.anchor.scrollTop).toBe(310);
+    expect(spread.right?.entry.path).toBe("Ideas/B.md");
+
+    // Re-enter compare with Ideas/A.md on the left, then clearHeld(seq.sequence) -> keeps Ideas/A.md on left
+    state.holdVisibleSide("left", seq.sequence, seq.allEntriesByPath);
+    state.navigateToNote("Reading/G.md", seq.sequence);
+    state.toggleCompare(seq.sequence, seq.allEntriesByPath);
+    expect(state.spreadMode).toBe("compare");
+
+    state.clearHeld(seq.sequence);
+    spread = state.getSpread(seq.sequence, seq.allEntriesByPath);
+    expect(spread.mode).toBe("consecutive");
+    expect(state.narrowActiveSlot).toBe("left");
+    expect(state.held).toBeNull();
+    expect(spread.left?.entry.path).toBe("Ideas/A.md");
+    expect(spread.left?.anchor.scrollTop).toBe(310);
+    expect(spread.right?.entry.path).toBe("Ideas/B.md");
+
+    // In compare mode with held on the right (left = Reading/G.md, right = Ideas/A.md),
+    // unpinning right or clearing held keeps Reading/G.md on the left
+    state.recordScrollAnchor("Reading/G.md", "current", {
+      scrollTop: 420,
+      scrollRatio: 0.6,
+      blockIndex: 5,
+      blockOffsetRatio: 0.2,
+    });
+    state.holdVisibleSide("left", seq.sequence, seq.allEntriesByPath);
+    state.navigateToNote("Reading/G.md", seq.sequence);
+    state.returnToConsecutive(seq.sequence);
+    state.toggleCompare(seq.sequence, seq.allEntriesByPath);
+    spread = state.getSpread(seq.sequence, seq.allEntriesByPath);
+    expect(spread.mode).toBe("compare");
+    expect(spread.left?.entry.path).toBe("Reading/G.md");
+    expect(spread.right?.entry.path).toBe("Ideas/A.md");
+
+    state.holdVisibleSide("right", seq.sequence, seq.allEntriesByPath);
+    spread = state.getSpread(seq.sequence, seq.allEntriesByPath);
+    expect(spread.mode).toBe("consecutive");
+    expect(spread.left?.entry.path).toBe("Reading/G.md");
+    expect(spread.left?.anchor.scrollTop).toBe(420);
+
+    state.toggleCompare(seq.sequence, seq.allEntriesByPath);
+    state.clearHeld(seq.sequence);
+    spread = state.getSpread(seq.sequence, seq.allEntriesByPath);
+    expect(spread.mode).toBe("consecutive");
+    expect(spread.left?.entry.path).toBe("Reading/G.md");
+    expect(spread.left?.anchor.scrollTop).toBe(420);
+
+    // If the held note is outside the filtered sequence, clearHeld keeps the in-sequence current note
+    const seqAll = setupSequence(false);
+    const filteredState = new NotebookStateManager({ hideDailyNotes: false });
+    filteredState.reconcile(seqAll.sequence, seqAll.allEntriesByPath);
+    filteredState.navigateToNote("Journal/2026-11-10.md", seqAll.sequence);
+    filteredState.holdVisibleSide("left", seqAll.sequence, seqAll.allEntriesByPath);
+    filteredState.setHideDailyNotes(true);
+    const seqFiltered = setupSequence(true);
+    filteredState.reconcile(seqFiltered.sequence, seqFiltered.allEntriesByPath);
+
+    filteredState.clearHeld(seqFiltered.sequence);
+    const filteredSpread = filteredState.getSpread(seqFiltered.sequence, seqFiltered.allEntriesByPath);
+    expect(filteredSpread.mode).toBe("consecutive");
+    expect(filteredState.narrowActiveSlot).toBe("left");
+    expect(filteredState.held).toBeNull();
+    expect(filteredSpread.left?.entry.path).toBe("Reading/G.md");
   });
 });

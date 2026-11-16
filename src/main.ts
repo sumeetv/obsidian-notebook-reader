@@ -24,6 +24,11 @@ export default class NotebookReaderPlugin extends Plugin {
         })
     );
 
+    this.registerHoverLinkSource(NOTEBOOK_VIEW_TYPE, {
+      display: "Notebook Reader",
+      defaultMod: true,
+    });
+
     this.addRibbonIcon("book-open", "Open Notebook Reader", () => {
       void this.activateView();
     });
@@ -56,6 +61,16 @@ export default class NotebookReaderPlugin extends Plugin {
           await this.persistState();
           await this.refreshOpenViews();
         }
+      },
+    });
+
+    this.addCommand({
+      id: "clear-notebook-held-page",
+      name: "Clear held reading place",
+      callback: async () => {
+        this.stateManager.clearHeld(this.getSequenceResult().sequence);
+        await this.persistState();
+        await this.refreshOpenViews();
       },
     });
 

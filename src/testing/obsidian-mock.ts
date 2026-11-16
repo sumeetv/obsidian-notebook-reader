@@ -354,8 +354,17 @@ export class MockMetadataCache {
 
 export class MockWorkspace {
   private leaves: WorkspaceLeaf[] = [];
+  private events = new SimpleEvents();
   public openedLinks: Array<{ linktext: string; sourcePath: string }> = [];
   public openedFiles: Array<{ path: string; leafMode?: boolean | string }> = [];
+  public hoverLinkEvents: Array<{
+    event: MouseEvent;
+    source: string;
+    hoverParent: any;
+    targetEl: HTMLElement;
+    linktext: string;
+    sourcePath: string;
+  }> = [];
 
   getLeaf(newLeaf?: boolean | "tab" | "split" | "window"): WorkspaceLeaf {
     const leaf = new WorkspaceLeaf((file) => {
@@ -383,7 +392,16 @@ export class MockWorkspace {
     cb();
   }
 
-  trigger(): void {}
+  on(name: string, cb: EventHandler): EventRef {
+    return this.events.on(name, cb);
+  }
+
+  trigger(name: string, ...args: any[]): void {
+    if (name === "hover-link" && args[0]) {
+      this.hoverLinkEvents.push(args[0]);
+    }
+    this.events.trigger(name, ...args);
+  }
 }
 
 export class Component {
@@ -437,6 +455,14 @@ export class Component {
     if (idx >= 0) this.children.splice(idx, 1);
     return component;
   }
+}
+
+export class HoverPopover extends Component {
+  hoverEl: HTMLElement = document.createElement("div");
+  constructor(_parent: any, _targetEl: HTMLElement | null, _waitTime?: number) {
+    super();
+  }
+  hide(): void {}
 }
 
 export class View extends Component {
@@ -493,6 +519,7 @@ export class Plugin extends Component {
   manifest: any;
   private storage: any = null;
   private views = new Map<string, (leaf: WorkspaceLeaf) => View>();
+  public hoverLinkSources = new Map<string, { display: string; defaultMod: boolean }>();
 
   constructor(app: any, manifest: any) {
     super();
@@ -510,6 +537,10 @@ export class Plugin extends Component {
 
   registerView(type: string, creator: (leaf: WorkspaceLeaf) => View): void {
     this.views.set(type, creator);
+  }
+
+  registerHoverLinkSource(source: string, info: { display: string; defaultMod: boolean }): void {
+    this.hoverLinkSources.set(source, info);
   }
 
   createViewInstance(type: string, leaf: WorkspaceLeaf): View | null {

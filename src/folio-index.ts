@@ -3,6 +3,7 @@ import type { FolderSection, NoteEntry, SpreadSnapshot } from "./types/notebook"
 export interface FolioIndexCallbacks {
   onSelectNote: (path: string) => void;
   onActivateHeld: () => void;
+  onClearHeld?: () => void;
   onCloseIndex: () => void;
 }
 
@@ -38,7 +39,18 @@ export class FolioIndexPanel {
       text: `${model.spread.totalNotes} ${model.spread.totalNotes === 1 ? "note" : "notes"} in sequence`,
     });
 
-    const closeBtn = header.createEl("button", {
+    const headerActions = header.createDiv({ cls: "nb-folio-header-actions" });
+    if (model.spread.heldEntry) {
+      const clearHeldBtn = headerActions.createEl("button", {
+        cls: "nb-folio-clear-held-btn",
+        type: "button",
+        text: "Clear held",
+        attr: { "aria-label": "Clear held page" },
+      });
+      clearHeldBtn.addEventListener("click", () => this.callbacks.onClearHeld?.());
+    }
+
+    const closeBtn = headerActions.createEl("button", {
       cls: "nb-folio-close-btn",
       type: "button",
       text: "Close index",
