@@ -159,12 +159,14 @@ function sanitizePassageRef(raw) {
 }
 var NotebookStateManager = class {
   constructor(initial) {
+    this.compareHeldSide = "right";
     this.data = createDefaultPersistedData();
     if (initial) {
       this.hydrate(initial);
     }
   }
   hydrate(raw) {
+    this.compareHeldSide = "right";
     const defaults = createDefaultPersistedData();
     if (!raw || typeof raw !== "object") {
       this.data = defaults;
@@ -342,7 +344,7 @@ var NotebookStateManager = class {
       path: target.path,
       anchor: cloneAnchor(this.data.positionsByPath[target.path])
     };
-    if (this.data.spreadMode === "pinned-right") {
+    if (this.data.spreadMode === "pinned-right" || this.data.spreadMode === "compare" && this.compareHeldSide === "right") {
       this.data.narrowActiveSlot = "left";
     } else if (this.data.spreadMode === "pinned-left" || this.data.spreadMode === "compare") {
       this.data.narrowActiveSlot = "right";
@@ -374,7 +376,7 @@ var NotebookStateManager = class {
     const spread = this.getSpread(sequence, allEntriesByPath);
     const targetPane = side === "left" ? spread.left : spread.right;
     if (!targetPane) return;
-    const alreadyPinnedHere = side === "left" && (this.data.spreadMode === "pinned-left" || this.data.spreadMode === "compare") || side === "right" && this.data.spreadMode === "pinned-right";
+    const alreadyPinnedHere = Boolean(targetPane.isPinned);
     if (alreadyPinnedHere && this.data.held?.path === targetPane.entry.path) {
       this.data.held = {
         path: targetPane.entry.path,
@@ -468,23 +470,43 @@ var NotebookStateManager = class {
     return true;
   }
   /**
-   * Toggles side-by-side comparison of `held` (left) and `current` (right)
-   * at their preserved passage anchors.
+   * Toggles side-by-side comparison of `current` and `held`
+   * at their preserved passage anchors without shifting the left panel when `held` is not there.
    */
   toggleCompare(sequence, allEntriesByPath) {
     if (!this.data.held || !allEntriesByPath.has(this.data.held.path)) {
       return false;
     }
     if (this.data.spreadMode === "compare") {
+      if (this.compareHeldSide === "left" && sequence.some((e) => e.path === this.data.held?.path)) {
+        this.data.current = {
+          path: this.data.held.path,
+          anchor: cloneAnchor(this.data.held.anchor)
+        };
+      }
       this.returnToConsecutive(sequence);
     } else {
+      const spread = this.getSpread(sequence, allEntriesByPath);
+      const heldOnLeft = spread.left?.entry.path === this.data.held.path;
+      if (heldOnLeft) {
+        this.compareHeldSide = "left";
+        if (this.data.spreadMode === "consecutive" && spread.right) {
+          this.data.current = {
+            path: spread.right.entry.path,
+            anchor: cloneAnchor(spread.right.anchor)
+          };
+        }
+      } else {
+        this.compareHeldSide = "right";
+      }
       this.data.spreadMode = "compare";
       this.data.narrowActiveSlot = "right";
     }
     return true;
   }
   clearHeld(sequence) {
-    if ((this.data.spreadMode === "pinned-left" || this.data.spreadMode === "compare") && this.data.held && sequence?.some((e) => e.path === this.data.held?.path)) {
+    const heldPinnedLeft = this.data.spreadMode === "pinned-left" || this.data.spreadMode === "compare" && this.compareHeldSide === "left";
+    if (heldPinnedLeft && this.data.held && sequence?.some((e) => e.path === this.data.held?.path)) {
       this.data.current = {
         path: this.data.held.path,
         anchor: cloneAnchor(this.data.held.anchor)
@@ -536,6 +558,11 @@ var NotebookStateManager = class {
       }
     }
   }
+  resolveHeldSide() {
+    if (this.data.spreadMode === "pinned-right") return "right";
+    if (this.data.spreadMode === "compare") return this.compareHeldSide;
+    return "left";
+  }
   getSpread(sequence, allEntriesByPath) {
     const indexByPath = /* @__PURE__ */ new Map();
     sequence.forEach((entry, idx) => indexByPath.set(entry.path, idx));
@@ -544,8 +571,9 @@ var NotebookStateManager = class {
     const currentEntry = this.data.current ? allEntriesByPath.get(this.data.current.path) ?? null : sequence[0] ?? null;
     if (!currentEntry) {
       if (heldEntry && this.data.held && this.data.spreadMode !== "consecutive") {
+        const heldSide = this.resolveHeldSide();
         const heldPane = {
-          side: this.data.spreadMode === "pinned-right" ? "right" : "left",
+          side: heldSide,
           role: "held",
           entry: heldEntry,
           anchor: cloneAnchor(this.data.held.anchor),
@@ -588,7 +616,7 @@ var NotebookStateManager = class {
       sequenceIndex: currentIndex
     });
     if (heldEntry && this.data.held && (this.data.spreadMode === "pinned-left" || this.data.spreadMode === "pinned-right" || this.data.spreadMode === "compare")) {
-      const heldSide = this.data.spreadMode === "pinned-right" ? "right" : "left";
+      const heldSide = this.resolveHeldSide();
       const browseSide = heldSide === "left" ? "right" : "left";
       const heldPane = {
         side: heldSide,
@@ -2508,8 +2536,8 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
     this.nextBtn.disabled = atEnd;
     this.holdLeftBtn.disabled = !spread.left;
     this.holdRightBtn.disabled = !spread.right;
-    const leftPinned = spread.mode === "pinned-left" || spread.mode === "compare";
-    const rightPinned = spread.mode === "pinned-right";
+    const leftPinned = Boolean(spread.left?.isPinned);
+    const rightPinned = Boolean(spread.right?.isPinned);
     this.holdLeftBtn.setText(leftPinned ? "Unpin left" : "Hold left page");
     this.holdLeftBtn.toggleClass("is-active", leftPinned);
     this.holdRightBtn.setText(rightPinned ? "Unpin right" : "Hold right page");

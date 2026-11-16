@@ -827,6 +827,16 @@ describe("NotebookReaderView DOM & interaction flows", () => {
   });
 
   it("displays held note location, section, page number, and heading, and triggers hover-link previews on held indicators", async () => {
+    const css = fs.readFileSync(path.resolve(__dirname, "../styles.css"), "utf8");
+    const heldJumpRule = css.match(/\.nb-root \.nb-held-jump-btn,\s*\.nb-held-jump-btn\s*\{[^}]*\}/)?.[0] ?? "";
+    expect(heldJumpRule).toContain("display: block;");
+    expect(heldJumpRule).toContain("text-align: left;");
+    expect(heldJumpRule).toContain("justify-content: flex-start;");
+    expect(heldJumpRule).toContain("padding: 4px 12px;");
+    const heldJumpDisabledRule =
+      css.match(/\.nb-root \.nb-held-jump-btn:disabled,\s*\.nb-held-jump-btn:disabled\s*\{[^}]*\}/)?.[0] ?? "";
+    expect(heldJumpDisabledRule).toContain("padding: 4px 12px;");
+
     const { app, view } = await mountPluginView(makeRichVaultSeeds());
 
     const heldSummary = view.contentEl.querySelector(".nb-held-summary") as HTMLButtonElement;
@@ -958,19 +968,28 @@ describe("NotebookReaderView DOM & interaction flows", () => {
       heldSummary.click();
       await new Promise((r) => setTimeout(r, 15));
       expect(plugin.getStateManager().spreadMode).toBe("compare");
+      // Held page was not visible on left -> keep current ("Slow knowledge") on left and show held on right
       expect(view.contentEl.querySelector(".nb-page-left .nb-page-title")?.textContent).toBe(
-        "Attention is a material"
-      );
-      expect(view.contentEl.querySelector(".nb-page-right .nb-page-title")?.textContent).toBe(
         "Slow knowledge"
       );
+      expect(view.contentEl.querySelector(".nb-page-right .nb-page-title")?.textContent).toBe(
+        "Attention is a material"
+      );
+      expect(view.contentEl.querySelector(".nb-hold-left-btn")?.textContent).toBe("Hold left page");
+      expect(view.contentEl.querySelector(".nb-hold-right-btn")?.textContent).toBe("Unpin right");
+      expect(view.contentEl.querySelector(".nb-hold-right-btn")?.classList.contains("is-active")).toBe(
+        true
+      );
 
-      // 2. Clear via bottom bar .nb-clear-held-btn
+      // 2. Clear via bottom bar .nb-clear-held-btn -> keeps "Slow knowledge" on left
       clearHeldBtn.click();
       await new Promise((r) => setTimeout(r, 15));
 
       expect(plugin.getStateManager().held).toBeNull();
       expect(plugin.getStateManager().spreadMode).toBe("consecutive");
+      expect(view.contentEl.querySelector(".nb-page-left .nb-page-title")?.textContent).toBe(
+        "Slow knowledge"
+      );
       expect(heldSummary.textContent).toBe("No held page");
       expect(heldSummary.disabled).toBe(true);
       expect(clearHeldBtn.hasAttribute("hidden")).toBe(true);
@@ -978,13 +997,11 @@ describe("NotebookReaderView DOM & interaction flows", () => {
       expect(edgeHeldMarker.hasAttribute("hidden")).toBe(true);
       expect(edgeHeldMarker.hasAttribute("data-note-path")).toBe(false);
 
-      // 3. Hold right page ("Constraints make room"), clear via .nb-edge-held-clear click (without activating held note)
+      // 3. Hold right page ("Gardens and paths"), clear via .nb-edge-held-clear click (without activating held note)
       (view.contentEl.querySelector(".nb-page-right .nb-pane-pin-btn") as HTMLButtonElement).click();
       await new Promise((r) => setTimeout(r, 15));
-      expect(heldSummary.textContent).toBe(
-        "Held: Constraints make room (Ideas · p. 2 · § Constraints make room)"
-      );
-      expect(view.contentEl.querySelector(".nb-edge-held-meta")?.textContent).toBe("Ideas · p. 2");
+      expect(heldSummary.textContent).toContain("Held: Gardens and paths (Reading · p. 4");
+      expect(view.contentEl.querySelector(".nb-edge-held-meta")?.textContent).toBe("Reading · p. 4");
 
       const edgeClearBtn = view.contentEl.querySelector(".nb-edge-held-clear") as HTMLElement;
       expect(edgeClearBtn).not.toBeNull();

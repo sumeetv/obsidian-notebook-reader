@@ -1208,8 +1208,8 @@ export class NotebookReaderView extends ItemView implements HoverParent {
     this.holdLeftBtn.disabled = !spread.left;
     this.holdRightBtn.disabled = !spread.right;
 
-    const leftPinned = spread.mode === "pinned-left" || spread.mode === "compare";
-    const rightPinned = spread.mode === "pinned-right";
+    const leftPinned = Boolean(spread.left?.isPinned);
+    const rightPinned = Boolean(spread.right?.isPinned);
     this.holdLeftBtn.setText(leftPinned ? "Unpin left" : "Hold left page");
     this.holdLeftBtn.toggleClass("is-active", leftPinned);
     this.holdRightBtn.setText(rightPinned ? "Unpin right" : "Hold right page");

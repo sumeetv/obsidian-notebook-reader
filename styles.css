@@ -1238,67 +1238,83 @@
 .nb-held-widget {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  justify-content: flex-start;
+  gap: 4px;
   min-width: 0;
-  max-width: min(360px, 60vw);
+  max-width: min(420px, 60vw);
+  min-height: 34px;
+  padding: 3px 6px;
   border-radius: 999px;
-  border: 1px solid transparent;
+  background: var(--nb-paper);
+  border: 1px solid var(--nb-line-strong);
 }
 
 .nb-held-widget.has-held {
   background: var(--nb-paper);
-  border-color: var(--nb-line-strong);
-  padding: 1px 4px 1px 2px;
+  border-color: var(--nb-accent);
+  padding: 3px 6px;
 }
 
+.nb-root .nb-held-jump-btn,
 .nb-held-jump-btn {
   appearance: none;
+  -webkit-appearance: none;
+  display: block;
+  flex: 1 1 auto;
+  text-align: left;
+  justify-content: flex-start;
   border: 0;
   background: transparent;
+  background-color: transparent;
   box-shadow: none;
   color: var(--nb-muted);
   font-family: var(--nb-ui-font);
   font-size: 12px;
   font-weight: 500;
-  line-height: 1.3;
+  line-height: 20px;
   height: auto;
-  min-height: 26px;
-  padding: 2px 8px;
+  min-height: 28px;
+  padding: 4px 12px;
   border-radius: 999px;
   cursor: pointer;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  text-align: left;
   transition: background-color 0.12s ease, color 0.12s ease;
 }
 
+.nb-root .nb-held-jump-btn:disabled,
 .nb-held-jump-btn:disabled {
   cursor: default;
-  padding: 2px 4px;
+  padding: 4px 12px;
+  opacity: 0.85;
 }
 
+.nb-root .nb-held-jump-btn:not(:disabled),
 .nb-held-jump-btn:not(:disabled) {
   color: var(--nb-ink);
 }
 
+.nb-root .nb-held-jump-btn:hover:not(:disabled),
 .nb-held-jump-btn:hover:not(:disabled) {
-  background: var(--nb-accent-soft);
+  background-color: var(--nb-accent-soft);
   color: var(--nb-accent-ink);
 }
 
 .nb-held-summary.is-outside-filter {
   color: var(--nb-accent-ink);
-  background: var(--nb-accent-soft);
-  padding: 2px 8px;
+  background-color: var(--nb-accent-soft);
   border-radius: 999px;
 }
 
+.nb-root .nb-clear-held-btn,
 .nb-clear-held-btn {
   appearance: none;
+  -webkit-appearance: none;
   border: 0;
   background: transparent;
+  background-color: transparent;
   box-shadow: none;
   color: var(--nb-muted);
   font-family: var(--nb-ui-font);
@@ -1321,8 +1337,9 @@
   display: none;
 }
 
+.nb-root .nb-clear-held-btn:hover:not(:disabled),
 .nb-clear-held-btn:hover:not(:disabled) {
-  background: var(--nb-accent-soft);
+  background-color: var(--nb-accent-soft);
   color: var(--nb-accent-ink);
 }
 
