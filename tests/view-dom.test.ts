@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Setting } from "obsidian";
 import NotebookReaderPlugin from "../src/main";
+import { NotebookReaderSettingTab } from "../src/settings";
 import { createMockApp, type MockNoteSeed, WorkspaceLeaf } from "../src/testing/obsidian-mock";
 import { NotebookReaderView, NOTEBOOK_VIEW_TYPE } from "../src/view";
 
@@ -195,7 +197,7 @@ describe("NotebookReaderView DOM & interaction flows", () => {
     rightScroll.dispatchEvent(new Event("scroll"));
 
     // Hold left page (Attention is a material at 420)
-    (view.contentEl.querySelector(".nb-bottombar button:nth-child(3)") as HTMLButtonElement).click();
+    (view.contentEl.querySelector(".nb-hold-left-btn") as HTMLButtonElement).click();
     await new Promise((r) => setTimeout(r, 10));
     expect(leftScroll.scrollTop).toBe(420);
 
@@ -545,6 +547,8 @@ describe("NotebookReaderView DOM & interaction flows", () => {
     const fileLinkRuleMatch = css.match(/\.nb-page-file-link\s*\{[^}]*\}/);
     expect(fileLinkRuleMatch?.[0]).toContain("text-align: left;");
     expect(fileLinkRuleMatch?.[0]).toContain("justify-content: flex-start;");
+    const tooltipRuleMatch = css.match(/\.nb-folder-tab-tooltip\s*\{[^}]*\}/);
+    expect(tooltipRuleMatch?.[0]).toContain("width: max-content;");
 
     const { view } = await mountPluginView([
       {
@@ -603,5 +607,705 @@ describe("NotebookReaderView DOM & interaction flows", () => {
 
     expect(tooltip.hasAttribute("hidden")).toBe(true);
     expect(view.contentEl.querySelector('.nb-page-left .nb-page-title')?.textContent).toBe("First note");
+  });
+
+  it("registers Notebook Reader as a hover-link source with defaultMod and triggers Obsidian hover-link previews on internal links and folio items", async () => {
+    const { app, plugin, view } = await mountPluginView(makeRichVaultSeeds());
+
+    expect((plugin as any).hoverLinkSources.get(NOTEBOOK_VIEW_TYPE)).toEqual({
+      display: "Notebook Reader",
+      defaultMod: true,
+    });
+
+    const internalLink = view.contentEl.querySelector('.nb-page-left a.internal-link') as HTMLAnchorElement;
+    expect(internalLink).not.toBeNull();
+
+    const linkMouseover = new MouseEvent("mouseover", {
+      bubbles: true,
+      metaKey: true,
+    });
+    internalLink.dispatchEvent(linkMouseover);
+
+    expect(app.workspace.hoverLinkEvents).toHaveLength(1);
+    expect(app.workspace.hoverLinkEvents[0]).toEqual({
+      event: linkMouseover,
+      source: NOTEBOOK_VIEW_TYPE,
+      hoverParent: view,
+      targetEl: internalLink,
+      linktext: "Constraints make room",
+      sourcePath: "Ideas/Attention is a material.md",
+    });
+    expect(app.workspace.hoverLinkEvents[0].event.metaKey).toBe(true);
+
+    // Hovering note rows inside Indexed Folio also triggers Obsidian hover-link preview
+    (view.contentEl.querySelector(".nb-index-btn") as HTMLButtonElement).click();
+    await new Promise((r) => setTimeout(r, 15));
+
+    const folioItem = view.contentEl.querySelector(
+      '.nb-folio-item[data-note-path="Ideas/Slow knowledge.md"]'
+    ) as HTMLButtonElement;
+    expect(folioItem).not.toBeNull();
+
+    const folioMouseover = new MouseEvent("mouseover", {
+      bubbles: true,
+      metaKey: true,
+    });
+    folioItem.dispatchEvent(folioMouseover);
+
+    expect(app.workspace.hoverLinkEvents).toHaveLength(2);
+    expect(app.workspace.hoverLinkEvents[1]).toEqual({
+      event: folioMouseover,
+      source: NOTEBOOK_VIEW_TYPE,
+      hoverParent: view,
+      targetEl: folioItem,
+      linktext: "Ideas/Slow knowledge.md",
+      sourcePath: "",
+    });
+  });
+
+  it("prevents iPad downward swipe from triggering Obsidian pull-down command palette while preserving reading scroll", async () => {
+    const { view } = await mountPluginView(makeRichVaultSeeds());
+
+    expect(view.contentEl.getAttribute("data-ignore-swipe")).toBe("true");
+    expect(view.contentEl.classList.contains("ignore-swipe")).toBe(true);
+
+    const rootEl = view.contentEl.querySelector(".nb-root") as HTMLElement;
+    const spreadEl = view.contentEl.querySelector(".nb-book-spread") as HTMLElement;
+    const leftScroll = view.contentEl.querySelector('[data-pane-scroll="left"]') as HTMLElement;
+    const rightScroll = view.contentEl.querySelector('[data-pane-scroll="right"]') as HTMLElement;
+    const leftArticle = leftScroll.querySelector(".nb-page-article") as HTMLElement;
+
+    expect(rootEl.getAttribute("data-ignore-swipe")).toBe("true");
+    expect(rootEl.classList.contains("ignore-swipe")).toBe(true);
+    expect(spreadEl.getAttribute("data-ignore-swipe")).toBe("true");
+    expect(spreadEl.classList.contains("ignore-swipe")).toBe(true);
+    expect(leftScroll.getAttribute("data-ignore-swipe")).toBe("true");
+    expect(rightScroll.getAttribute("data-ignore-swipe")).toBe("true");
+
+    const css = fs.readFileSync(path.resolve(__dirname, "../styles.css"), "utf8");
+    for (const selector of [".nb-view-host", ".nb-root", ".nb-book-spread", ".nb-page-scroll"]) {
+      const escaped = selector.replace(".", "\\.");
+      const rule = css.match(new RegExp(`${escaped}\\s*\\{[^}]*\\}`))?.[0] ?? "";
+      expect(rule).toContain("overscroll-behavior: contain;");
+      expect(rule).toContain("overscroll-behavior-y: contain;");
+    }
+
+    const createTouchEvent = (
+      type: "touchstart" | "touchmove" | "touchend" | "touchcancel",
+      target: HTMLElement,
+      touch: { identifier: number; clientX: number; clientY: number }
+    ): Event => {
+      const touchObj = { ...touch, target };
+      const touchList = Object.assign([touchObj], {
+        item: (index: number) => (index === 0 ? touchObj : null),
+      });
+      const ev =
+        typeof TouchEvent !== "undefined"
+          ? new TouchEvent(type, { bubbles: true, cancelable: true })
+          : new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(ev, "changedTouches", { configurable: true, value: touchList });
+      Object.defineProperty(ev, "touches", {
+        configurable: true,
+        value: type === "touchend" || type === "touchcancel" ? [] : touchList,
+      });
+      return ev;
+    };
+
+    const docTouchStart = vi.fn();
+    const docTouchMove = vi.fn();
+    const docTouchEnd = vi.fn();
+    const docTouchCancel = vi.fn();
+    document.addEventListener("touchstart", docTouchStart);
+    document.addEventListener("touchmove", docTouchMove);
+    document.addEventListener("touchend", docTouchEnd);
+    document.addEventListener("touchcancel", docTouchCancel);
+
+    try {
+      // 1. At top of page (scrollTop === 0), pulling down stops propagation and prevents default bounce
+      leftScroll.scrollTop = 0;
+      const startTop = createTouchEvent("touchstart", leftArticle, {
+        identifier: 1,
+        clientX: 200,
+        clientY: 160,
+      });
+      const pullDownAtTop = createTouchEvent("touchmove", leftArticle, {
+        identifier: 1,
+        clientX: 204,
+        clientY: 230,
+      });
+      const endTop = createTouchEvent("touchend", leftArticle, {
+        identifier: 1,
+        clientX: 204,
+        clientY: 230,
+      });
+
+      leftArticle.dispatchEvent(startTop);
+      leftArticle.dispatchEvent(pullDownAtTop);
+      leftArticle.dispatchEvent(endTop);
+
+      expect(docTouchStart).not.toHaveBeenCalled();
+      expect(docTouchMove).not.toHaveBeenCalled();
+      expect(docTouchEnd).not.toHaveBeenCalled();
+      expect(pullDownAtTop.defaultPrevented).toBe(true);
+
+      // 2. At top of page (scrollTop === 0), swiping up to read further stops propagation without preventing default
+      const startSwipeUp = createTouchEvent("touchstart", leftArticle, {
+        identifier: 2,
+        clientX: 200,
+        clientY: 300,
+      });
+      const swipeUp = createTouchEvent("touchmove", leftArticle, {
+        identifier: 2,
+        clientX: 200,
+        clientY: 220,
+      });
+      const cancelSwipeUp = createTouchEvent("touchcancel", leftArticle, {
+        identifier: 2,
+        clientX: 200,
+        clientY: 220,
+      });
+      leftArticle.dispatchEvent(startSwipeUp);
+      leftArticle.dispatchEvent(swipeUp);
+      leftArticle.dispatchEvent(cancelSwipeUp);
+
+      expect(docTouchStart).not.toHaveBeenCalled();
+      expect(docTouchMove).not.toHaveBeenCalled();
+      expect(docTouchCancel).not.toHaveBeenCalled();
+      expect(swipeUp.defaultPrevented).toBe(false);
+
+      // 3. When scrolled down (scrollTop > 0), pulling down stops propagation without calling preventDefault
+      Object.defineProperty(leftScroll, "scrollHeight", { configurable: true, value: 2000 });
+      Object.defineProperty(leftScroll, "clientHeight", { configurable: true, value: 600 });
+      leftScroll.scrollTop = 180;
+
+      const startScrolled = createTouchEvent("touchstart", leftScroll, {
+        identifier: 3,
+        clientX: 200,
+        clientY: 160,
+      });
+      const pullDownScrolled = createTouchEvent("touchmove", leftScroll, {
+        identifier: 3,
+        clientX: 202,
+        clientY: 240,
+      });
+      const endScrolled = createTouchEvent("touchend", leftScroll, {
+        identifier: 3,
+        clientX: 202,
+        clientY: 240,
+      });
+
+      leftScroll.dispatchEvent(startScrolled);
+      leftScroll.dispatchEvent(pullDownScrolled);
+      leftScroll.dispatchEvent(endScrolled);
+
+      expect(docTouchStart).not.toHaveBeenCalled();
+      expect(docTouchMove).not.toHaveBeenCalled();
+      expect(docTouchEnd).not.toHaveBeenCalled();
+      expect(pullDownScrolled.defaultPrevented).toBe(false);
+
+      // 4. At top of page, horizontal swipe does not call preventDefault
+      leftScroll.scrollTop = 0;
+      const startHorizontal = createTouchEvent("touchstart", leftArticle, {
+        identifier: 4,
+        clientX: 320,
+        clientY: 200,
+      });
+      const moveHorizontal = createTouchEvent("touchmove", leftArticle, {
+        identifier: 4,
+        clientX: 210,
+        clientY: 206,
+      });
+      leftArticle.dispatchEvent(startHorizontal);
+      leftArticle.dispatchEvent(moveHorizontal);
+      expect(moveHorizontal.defaultPrevented).toBe(false);
+    } finally {
+      document.removeEventListener("touchstart", docTouchStart);
+      document.removeEventListener("touchmove", docTouchMove);
+      document.removeEventListener("touchend", docTouchEnd);
+      document.removeEventListener("touchcancel", docTouchCancel);
+    }
+  });
+
+  it("displays held note location, section, page number, and heading, and triggers hover-link previews on held indicators", async () => {
+    const { app, view } = await mountPluginView(makeRichVaultSeeds());
+
+    const heldSummary = view.contentEl.querySelector(".nb-held-summary") as HTMLButtonElement;
+    const heldWidget = view.contentEl.querySelector(".nb-held-widget") as HTMLElement;
+    const clearHeldBtn = view.contentEl.querySelector(".nb-clear-held-btn") as HTMLButtonElement;
+    const edgeHeldMarker = view.contentEl.querySelector(".nb-edge-held-marker") as HTMLButtonElement;
+
+    expect(heldSummary.textContent).toBe("No held page");
+    expect(heldSummary.disabled).toBe(true);
+    expect(heldSummary.hasAttribute("data-note-path")).toBe(false);
+    expect(heldWidget.classList.contains("has-held")).toBe(false);
+    expect(clearHeldBtn.hasAttribute("hidden")).toBe(true);
+    expect(clearHeldBtn.disabled).toBe(true);
+    expect(edgeHeldMarker.hasAttribute("hidden")).toBe(true);
+
+    // Scroll left pane past ## Section 2 and hold it
+    const leftScroll = view.contentEl.querySelector('[data-pane-scroll="left"]') as HTMLElement;
+    Object.defineProperty(leftScroll, "scrollHeight", { configurable: true, value: 2400 });
+    Object.defineProperty(leftScroll, "clientHeight", { configurable: true, value: 600 });
+
+    const blocks = Array.from(
+      leftScroll.querySelectorAll<HTMLElement>("p, h1, h2, h3, h4, h5, h6, blockquote, ul, ol, pre, table")
+    );
+    blocks.forEach((block, index) => {
+      Object.defineProperty(block, "offsetTop", { configurable: true, value: index * 50 });
+      Object.defineProperty(block, "offsetHeight", { configurable: true, value: 40 });
+    });
+    const section2Idx = blocks.findIndex((b) => b.tagName === "H2" && b.textContent?.trim() === "Section 2");
+    expect(section2Idx).toBeGreaterThan(0);
+
+    leftScroll.scrollTop = (section2Idx + 1) * 50;
+    leftScroll.dispatchEvent(new Event("scroll"));
+
+    (view.contentEl.querySelector(".nb-page-left .nb-pane-pin-btn") as HTMLButtonElement).click();
+    await new Promise((r) => setTimeout(r, 15));
+
+    expect(heldSummary.textContent).toBe("Held: Attention is a material (Ideas · p. 1 · § Section 2)");
+    expect(heldSummary.disabled).toBe(false);
+    expect(heldSummary.getAttribute("data-note-path")).toBe("Ideas/Attention is a material.md");
+    expect(heldWidget.classList.contains("has-held")).toBe(true);
+    expect(clearHeldBtn.hasAttribute("hidden")).toBe(false);
+    expect(clearHeldBtn.disabled).toBe(false);
+
+    expect(edgeHeldMarker.hasAttribute("hidden")).toBe(false);
+    expect(edgeHeldMarker.getAttribute("data-note-path")).toBe("Ideas/Attention is a material.md");
+    expect(edgeHeldMarker.querySelector(".nb-edge-held-title")?.textContent).toBe(
+      "Held: Attention is a material"
+    );
+    expect(edgeHeldMarker.querySelector(".nb-edge-held-meta")?.textContent).toBe("Ideas · p. 1");
+    expect(edgeHeldMarker.querySelector(".nb-edge-held-clear")).not.toBeNull();
+
+    // Hovering .nb-held-summary triggers hover-link preview
+    const summaryMouseover = new MouseEvent("mouseover", { bubbles: true, metaKey: true });
+    heldSummary.dispatchEvent(summaryMouseover);
+
+    expect(app.workspace.hoverLinkEvents).toHaveLength(1);
+    expect(app.workspace.hoverLinkEvents[0]).toEqual({
+      event: summaryMouseover,
+      source: NOTEBOOK_VIEW_TYPE,
+      hoverParent: view,
+      targetEl: heldSummary,
+      linktext: "Ideas/Attention is a material.md",
+      sourcePath: "",
+    });
+
+    // Hovering .nb-edge-held-marker (or its inner title) triggers hover-link preview
+    const markerTitle = edgeHeldMarker.querySelector(".nb-edge-held-title") as HTMLElement;
+    const markerMouseover = new MouseEvent("mouseover", { bubbles: true, metaKey: true });
+    markerTitle.dispatchEvent(markerMouseover);
+
+    expect(app.workspace.hoverLinkEvents).toHaveLength(2);
+    expect(app.workspace.hoverLinkEvents[1]).toEqual({
+      event: markerMouseover,
+      source: NOTEBOOK_VIEW_TYPE,
+      hoverParent: view,
+      targetEl: edgeHeldMarker,
+      linktext: "Ideas/Attention is a material.md",
+      sourcePath: "",
+    });
+  });
+
+  it("activates held page via held summary and clears held bookmark from bottom bar, thumb edge, folio index, and command", async () => {
+    const commands: Array<{ id: string; name: string; callback: () => Promise<void> | void }> = [];
+    const addCommandSpy = vi
+      .spyOn(NotebookReaderPlugin.prototype, "addCommand")
+      .mockImplementation((cmd: any) => {
+        commands.push(cmd);
+        return cmd;
+      });
+
+    try {
+      const app = createMockApp(makeRichVaultSeeds(), "Fieldnotes");
+      const plugin = new NotebookReaderPlugin(app as any, {
+        id: "obsidian-notebook-reader",
+        name: "Notebook Reader",
+        version: "0.1.0",
+        minAppVersion: "1.5.0",
+        description: "",
+        author: "",
+      });
+      await plugin.onload();
+      const leaf = app.workspace.getLeaf(false);
+      const view = (
+        plugin as unknown as {
+          createViewInstance: (type: string, leaf: WorkspaceLeaf) => NotebookReaderView;
+        }
+      ).createViewInstance(NOTEBOOK_VIEW_TYPE, leaf);
+      await view.onOpen();
+      document.body.innerHTML = "";
+      document.body.appendChild(view.containerEl);
+
+      const heldSummary = view.contentEl.querySelector(".nb-held-summary") as HTMLButtonElement;
+      const clearHeldBtn = view.contentEl.querySelector(".nb-clear-held-btn") as HTMLButtonElement;
+      const edgeHeldMarker = view.contentEl.querySelector(".nb-edge-held-marker") as HTMLButtonElement;
+
+      // 1. Hold left page ("Attention is a material"), browse forward, return to consecutive, then click .nb-held-summary to compare
+      (view.contentEl.querySelector(".nb-page-left .nb-pane-pin-btn") as HTMLButtonElement).click();
+      await new Promise((r) => setTimeout(r, 15));
+      (view.contentEl.querySelector('[aria-label="Next page"]') as HTMLButtonElement).click();
+      await new Promise((r) => setTimeout(r, 15));
+      (view.contentEl.querySelector(".nb-consecutive-btn") as HTMLButtonElement).click();
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(plugin.getStateManager().spreadMode).toBe("consecutive");
+      expect(view.contentEl.querySelector(".nb-page-left .nb-page-title")?.textContent).toBe(
+        "Slow knowledge"
+      );
+
+      heldSummary.click();
+      await new Promise((r) => setTimeout(r, 15));
+      expect(plugin.getStateManager().spreadMode).toBe("compare");
+      expect(view.contentEl.querySelector(".nb-page-left .nb-page-title")?.textContent).toBe(
+        "Attention is a material"
+      );
+      expect(view.contentEl.querySelector(".nb-page-right .nb-page-title")?.textContent).toBe(
+        "Slow knowledge"
+      );
+
+      // 2. Clear via bottom bar .nb-clear-held-btn
+      clearHeldBtn.click();
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(plugin.getStateManager().held).toBeNull();
+      expect(plugin.getStateManager().spreadMode).toBe("consecutive");
+      expect(heldSummary.textContent).toBe("No held page");
+      expect(heldSummary.disabled).toBe(true);
+      expect(clearHeldBtn.hasAttribute("hidden")).toBe(true);
+      expect(clearHeldBtn.disabled).toBe(true);
+      expect(edgeHeldMarker.hasAttribute("hidden")).toBe(true);
+      expect(edgeHeldMarker.hasAttribute("data-note-path")).toBe(false);
+
+      // 3. Hold right page ("Constraints make room"), clear via .nb-edge-held-clear click (without activating held note)
+      (view.contentEl.querySelector(".nb-page-right .nb-pane-pin-btn") as HTMLButtonElement).click();
+      await new Promise((r) => setTimeout(r, 15));
+      expect(heldSummary.textContent).toBe(
+        "Held: Constraints make room (Ideas · p. 2 · § Constraints make room)"
+      );
+      expect(view.contentEl.querySelector(".nb-edge-held-meta")?.textContent).toBe("Ideas · p. 2");
+
+      const edgeClearBtn = view.contentEl.querySelector(".nb-edge-held-clear") as HTMLElement;
+      expect(edgeClearBtn).not.toBeNull();
+      edgeClearBtn.click();
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(plugin.getStateManager().held).toBeNull();
+      expect(plugin.getStateManager().spreadMode).toBe("consecutive");
+      expect(heldSummary.textContent).toBe("No held page");
+      expect(clearHeldBtn.hasAttribute("hidden")).toBe(true);
+      expect(edgeHeldMarker.hasAttribute("hidden")).toBe(true);
+
+      // Also verify keyboard Enter on .nb-edge-held-clear clears held bookmark
+      (view.contentEl.querySelector(".nb-page-left .nb-pane-pin-btn") as HTMLButtonElement).click();
+      await new Promise((r) => setTimeout(r, 15));
+      const edgeClearBtn2 = view.contentEl.querySelector(".nb-edge-held-clear") as HTMLElement;
+      edgeClearBtn2.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 15));
+      expect(plugin.getStateManager().held).toBeNull();
+      expect(heldSummary.textContent).toBe("No held page");
+
+      // 4. Hold left page, open Indexed Folio, and clear via .nb-folio-clear-held-btn
+      (view.contentEl.querySelector(".nb-page-left .nb-pane-pin-btn") as HTMLButtonElement).click();
+      await new Promise((r) => setTimeout(r, 15));
+      (view.contentEl.querySelector(".nb-index-btn") as HTMLButtonElement).click();
+      await new Promise((r) => setTimeout(r, 15));
+
+      const folioClearBtn = view.contentEl.querySelector(".nb-folio-clear-held-btn") as HTMLButtonElement;
+      expect(folioClearBtn).not.toBeNull();
+      expect(folioClearBtn.textContent).toBe("Clear held");
+      folioClearBtn.click();
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(plugin.getStateManager().held).toBeNull();
+      expect(view.contentEl.querySelector(".nb-folio-clear-held-btn")).toBeNull();
+      expect(heldSummary.textContent).toBe("No held page");
+      expect(clearHeldBtn.hasAttribute("hidden")).toBe(true);
+
+      // Close index so thumb edge returns for the command check
+      (view.contentEl.querySelector(".nb-folio-close-btn") as HTMLButtonElement).click();
+      await new Promise((r) => setTimeout(r, 15));
+
+      // 5. Hold a note and clear via clear-notebook-held-page command
+      (view.contentEl.querySelector(".nb-page-left .nb-pane-pin-btn") as HTMLButtonElement).click();
+      await new Promise((r) => setTimeout(r, 15));
+      expect(plugin.getStateManager().held).not.toBeNull();
+
+      const clearCmd = commands.find((c) => c.id === "clear-notebook-held-page");
+      expect(clearCmd).toBeDefined();
+      expect(clearCmd?.name).toBe("Clear held reading place");
+      await clearCmd?.callback();
+
+      expect(plugin.getStateManager().held).toBeNull();
+      const persisted = await plugin.loadData();
+      expect(persisted.held).toBeNull();
+      expect(heldSummary.textContent).toBe("No held page");
+      expect(clearHeldBtn.hasAttribute("hidden")).toBe(true);
+      expect(view.contentEl.querySelector(".nb-edge-held-marker")?.hasAttribute("hidden")).toBe(true);
+    } finally {
+      addCommandSpy.mockRestore();
+    }
+  });
+
+  it("navigates pages with desktop ArrowLeft/ArrowRight keys while respecting inputs, modifiers, modals, and focused thumb edge", async () => {
+    const { plugin, view } = await mountPluginView(makeRichVaultSeeds());
+
+    expect(view.contentEl.querySelector(".nb-page-left .nb-page-title")?.textContent).toBe(
+      "Attention is a material"
+    );
+
+    // ArrowRight on window advances one note forward
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", cancelable: true }));
+    await new Promise((r) => setTimeout(r, 15));
+    expect(view.contentEl.querySelector(".nb-page-left .nb-page-title")?.textContent).toBe(
+      "Constraints make room"
+    );
+
+    // ArrowLeft on window steps one note backward
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", cancelable: true }));
+    await new Promise((r) => setTimeout(r, 15));
+    expect(view.contentEl.querySelector(".nb-page-left .nb-page-title")?.textContent).toBe(
+      "Attention is a material"
+    );
+
+    // Modifier keys must not trigger page navigation
+    for (const mod of ["metaKey", "ctrlKey", "altKey", "shiftKey"] as const) {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowRight", [mod]: true, cancelable: true })
+      );
+      await new Promise((r) => setTimeout(r, 10));
+      expect(view.contentEl.querySelector(".nb-page-left .nb-page-title")?.textContent).toBe(
+        "Attention is a material"
+      );
+    }
+
+    // Already defaultPrevented events must not step
+    const preventedEvent = new KeyboardEvent("keydown", { key: "ArrowRight", cancelable: true });
+    preventedEvent.preventDefault();
+    window.dispatchEvent(preventedEvent);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(view.contentEl.querySelector(".nb-page-left .nb-page-title")?.textContent).toBe(
+      "Attention is a material"
+    );
+
+    // Editable targets (input, textarea, select, contenteditable) must not trigger page navigation
+    const inputEl = document.createElement("input");
+    const textareaEl = document.createElement("textarea");
+    const selectEl = document.createElement("select");
+    const editableEl = document.createElement("div");
+    editableEl.setAttribute("contenteditable", "true");
+    document.body.append(inputEl, textareaEl, selectEl, editableEl);
+
+    for (const target of [inputEl, textareaEl, selectEl, editableEl]) {
+      target.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true })
+      );
+      await new Promise((r) => setTimeout(r, 10));
+      expect(view.contentEl.querySelector(".nb-page-left .nb-page-title")?.textContent).toBe(
+        "Attention is a material"
+      );
+    }
+
+    // Open modal/prompt must block page navigation
+    const modal = document.createElement("div");
+    modal.className = "modal-container";
+    document.body.appendChild(modal);
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", cancelable: true }));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(view.contentEl.querySelector(".nb-page-left .nb-page-title")?.textContent).toBe(
+      "Attention is a material"
+    );
+    modal.remove();
+
+    // Focused .nb-edge-track handles ArrowRight once and calls preventDefault so window listener does not double-step
+    const track = view.contentEl.querySelector(".nb-edge-track") as HTMLElement;
+    track.focus();
+    track.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true })
+    );
+    await new Promise((r) => setTimeout(r, 15));
+    expect(view.contentEl.querySelector(".nb-page-left .nb-page-title")?.textContent).toBe(
+      "Constraints make room"
+    );
+
+    // Closed view ignores further window keydowns
+    await view.onClose();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", cancelable: true }));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(plugin.getStateManager().current?.path).toBe("Ideas/Constraints make room.md");
+  });
+
+  it("places Prev/Next buttons in bottom-right by default, supports bottom-left setting with persistence, and defines ordering CSS", async () => {
+    const css = fs.readFileSync(path.resolve(__dirname, "../styles.css"), "utf8");
+    expect(css).toContain(".nb-bottom-nav");
+    expect(css).toContain(".nb-bottombar.is-nav-right .nb-bottom-actions");
+    expect(css).toContain(".nb-bottombar.is-nav-right .nb-bottom-status");
+    expect(css).toContain(".nb-bottombar.is-nav-right .nb-bottom-nav");
+    expect(css).toContain(".nb-bottombar.is-nav-left .nb-bottom-nav");
+    expect(css).toContain(".nb-bottombar.is-nav-left .nb-bottom-actions");
+    expect(css).toContain(".nb-bottombar.is-nav-left .nb-bottom-status");
+
+    const app = createMockApp(makeRichVaultSeeds(), "Fieldnotes");
+    const plugin = new NotebookReaderPlugin(app as any, {
+      id: "obsidian-notebook-reader",
+      name: "Notebook Reader",
+      version: "0.1.0",
+      minAppVersion: "1.5.0",
+      description: "",
+      author: "",
+    });
+    await plugin.onload();
+    const leaf = app.workspace.getLeaf(false);
+    const view = (
+      plugin as unknown as {
+        createViewInstance: (type: string, leaf: WorkspaceLeaf) => NotebookReaderView;
+      }
+    ).createViewInstance(NOTEBOOK_VIEW_TYPE, leaf);
+    await view.onOpen();
+    document.body.innerHTML = "";
+    document.body.appendChild(view.containerEl);
+
+    const bottombar = view.contentEl.querySelector(".nb-bottombar") as HTMLElement;
+    const navGroup = view.contentEl.querySelector(".nb-bottom-nav") as HTMLElement;
+    const actionsGroup = view.contentEl.querySelector(".nb-bottom-actions") as HTMLElement;
+
+    // Prev and Next live inside .nb-bottom-nav rather than .nb-bottom-actions
+    expect(navGroup).not.toBeNull();
+    expect(navGroup.querySelector('[aria-label="Previous page"]')).not.toBeNull();
+    expect(navGroup.querySelector('[aria-label="Next page"]')).not.toBeNull();
+    expect(actionsGroup.querySelector('[aria-label="Previous page"]')).toBeNull();
+    expect(actionsGroup.querySelector('[aria-label="Next page"]')).toBeNull();
+    expect(actionsGroup.querySelector(".nb-hold-left-btn")).not.toBeNull();
+    expect(actionsGroup.querySelector(".nb-hold-right-btn")).not.toBeNull();
+    expect(actionsGroup.querySelector(".nb-consecutive-btn")).not.toBeNull();
+
+    // Default position is bottom right
+    expect(bottombar.getAttribute("data-nav-position")).toBe("right");
+    expect(bottombar.classList.contains("is-nav-right")).toBe(true);
+    expect(bottombar.classList.contains("is-nav-left")).toBe(false);
+
+    // Step forward so we can also verify Reset saved reading positions preserves navButtonPosition
+    (navGroup.querySelector('[aria-label="Next page"]') as HTMLButtonElement).click();
+    await new Promise((r) => setTimeout(r, 15));
+    expect(plugin.getStateManager().current?.path).toBe("Ideas/Constraints make room.md");
+
+    // Drive NotebookReaderSettingTab dropdown and reset button
+    let currentSettingName = "";
+    const dropdownOptions: Array<[string, string]> = [];
+    let initialDropdownValue = "";
+    let navDropdownOnChange: ((value: string) => Promise<void> | void) | null = null;
+    let resetBtnOnClick: ((evt: MouseEvent) => Promise<void> | void) | null = null;
+
+    const setNameSpy = vi.spyOn(Setting.prototype, "setName").mockImplementation(function (
+      this: Setting,
+      name: string
+    ) {
+      currentSettingName = name;
+      return this;
+    });
+    const addDropdownSpy = vi.spyOn(Setting.prototype, "addDropdown").mockImplementation(function (
+      this: Setting,
+      cb
+    ) {
+      const settingName = currentSettingName;
+      cb({
+        addOption(value: string, display: string) {
+          if (settingName === "Page navigation buttons") {
+            dropdownOptions.push([value, display]);
+          }
+          return this;
+        },
+        setValue(value: string) {
+          if (settingName === "Page navigation buttons") {
+            initialDropdownValue = value;
+          }
+          return this;
+        },
+        onChange(fn: (value: string) => any) {
+          if (settingName === "Page navigation buttons") {
+            navDropdownOnChange = fn;
+          }
+          return this;
+        },
+      } as any);
+      return this;
+    });
+    const addButtonSpy = vi.spyOn(Setting.prototype, "addButton").mockImplementation(function (
+      this: Setting,
+      cb
+    ) {
+      const settingName = currentSettingName;
+      cb({
+        setButtonText() {
+          return this;
+        },
+        setWarning() {
+          return this;
+        },
+        onClick(fn: (evt: MouseEvent) => any) {
+          if (settingName === "Reset saved reading positions") {
+            resetBtnOnClick = fn;
+          }
+          return this;
+        },
+      } as any);
+      return this;
+    });
+
+    try {
+      const settingTab = new NotebookReaderSettingTab(app as any, plugin);
+      settingTab.display();
+
+      expect(dropdownOptions).toEqual([
+        ["right", "Bottom right (Default)"],
+        ["left", "Bottom left (Left-handed)"],
+      ]);
+      expect(initialDropdownValue).toBe("right");
+      expect(navDropdownOnChange).not.toBeNull();
+      expect(resetBtnOnClick).not.toBeNull();
+
+      // Switch to bottom-left via settings dropdown
+      await navDropdownOnChange!("left");
+      expect(plugin.getStateManager().navButtonPosition).toBe("left");
+      expect(bottombar.getAttribute("data-nav-position")).toBe("left");
+      expect(bottombar.classList.contains("is-nav-left")).toBe(true);
+      expect(bottombar.classList.contains("is-nav-right")).toBe(false);
+
+      const persisted = await plugin.loadData();
+      expect(persisted.navButtonPosition).toBe("left");
+
+      // Reset saved reading positions preserves navButtonPosition
+      await resetBtnOnClick!(new MouseEvent("click"));
+      expect(plugin.getStateManager().navButtonPosition).toBe("left");
+      expect(bottombar.getAttribute("data-nav-position")).toBe("left");
+      expect(bottombar.classList.contains("is-nav-left")).toBe(true);
+
+      // Persists across plugin reload / view reopen
+      const reloadedPlugin = new NotebookReaderPlugin(app as any, plugin.manifest);
+      await reloadedPlugin.saveData(await plugin.loadData());
+      await reloadedPlugin.onload();
+      const reloadedLeaf = new WorkspaceLeaf();
+      const reloadedView = (
+        reloadedPlugin as unknown as {
+          createViewInstance: (type: string, leaf: WorkspaceLeaf) => NotebookReaderView;
+        }
+      ).createViewInstance(NOTEBOOK_VIEW_TYPE, reloadedLeaf);
+      await reloadedView.onOpen();
+
+      const reloadedBottombar = reloadedView.contentEl.querySelector(".nb-bottombar") as HTMLElement;
+      expect(reloadedBottombar.getAttribute("data-nav-position")).toBe("left");
+      expect(reloadedBottombar.classList.contains("is-nav-left")).toBe(true);
+
+      // Switch back to bottom-right
+      await navDropdownOnChange!("right");
+      expect(bottombar.getAttribute("data-nav-position")).toBe("right");
+      expect(bottombar.classList.contains("is-nav-right")).toBe(true);
+      expect(bottombar.classList.contains("is-nav-left")).toBe(false);
+    } finally {
+      setNameSpy.mockRestore();
+      addDropdownSpy.mockRestore();
+      addButtonSpy.mockRestore();
+    }
   });
 });

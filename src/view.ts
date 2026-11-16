@@ -7,6 +7,8 @@ import {
   WorkspaceLeaf,
   setIcon,
   type CachedMetadata,
+  type HoverParent,
+  type HoverPopover,
   type ViewStateResult,
 } from "obsidian";
 import { FolioIndexPanel } from "./folio-index";
@@ -141,7 +143,8 @@ export function restoreScrollAnchor(scrollEl: HTMLElement, anchor: PassageAnchor
   scrollEl.scrollTop = Math.max(0, anchor.scrollTop);
 }
 
-export class NotebookReaderView extends ItemView {
+export class NotebookReaderView extends ItemView implements HoverParent {
+  hoverPopover: HoverPopover | null = null;
   private readonly host: NotebookPluginHost;
 
   private rootEl!: HTMLDivElement;
@@ -162,6 +165,8 @@ export class NotebookReaderView extends ItemView {
   private rightPane!: PaneElements;
   private rightRailEl!: HTMLDivElement;
 
+  private bottomBarEl!: HTMLDivElement;
+  private navGroupEl!: HTMLDivElement;
   private prevBtn!: HTMLButtonElement;
   private nextBtn!: HTMLButtonElement;
   private holdLeftBtn!: HTMLButtonElement;
@@ -169,7 +174,9 @@ export class NotebookReaderView extends ItemView {
   private consecutiveBtn!: HTMLButtonElement;
   private swapBtn!: HTMLButtonElement;
   private compareBtn!: HTMLButtonElement;
-  private heldStatusEl!: HTMLSpanElement;
+  private heldWidgetEl!: HTMLDivElement;
+  private heldStatusEl!: HTMLButtonElement;
+  private clearHeldBtn!: HTMLButtonElement;
   private pageCounterEl!: HTMLSpanElement;
 
   private thumbEdge: ThumbEdgeController | null = null;
@@ -235,6 +242,8 @@ export class NotebookReaderView extends ItemView {
     this.isClosed = false;
     this.contentEl.empty();
     this.contentEl.addClass("nb-view-host");
+    this.contentEl.addClass("ignore-swipe");
+    this.contentEl.setAttr("data-ignore-swipe", "true");
 
     this.buildShell();
     this.bindInteractions();
@@ -259,6 +268,12 @@ export class NotebookReaderView extends ItemView {
     this.unloadPaneComponent("left");
     this.unloadPaneComponent("right");
 
+    if (this.hoverPopover) {
+      this.hoverPopover.hide?.();
+      this.hoverPopover.unload?.();
+      this.hoverPopover = null;
+    }
+
     this.thumbEdge?.destroy();
     this.thumbEdge = null;
     this.folioIndex?.destroy();
@@ -268,7 +283,10 @@ export class NotebookReaderView extends ItemView {
   }
 
   private buildShell(): void {
-    this.rootEl = this.contentEl.createDiv({ cls: "nb-root" });
+    this.rootEl = this.contentEl.createDiv({
+      cls: "nb-root ignore-swipe",
+      attr: { "data-ignore-swipe": "true" },
+    });
 
     // 1. Top Toolbar
     const topbar = this.rootEl.createDiv({ cls: "nb-topbar" });
@@ -358,7 +376,10 @@ export class NotebookReaderView extends ItemView {
     const stageEl = this.rootEl.createDiv({ cls: "nb-main-stage" });
 
     const bookFrameEl = stageEl.createDiv({ cls: "nb-book-frame" });
-    this.spreadEl = bookFrameEl.createDiv({ cls: "nb-book-spread" });
+    this.spreadEl = bookFrameEl.createDiv({
+      cls: "nb-book-spread ignore-swipe",
+      attr: { "data-ignore-swipe": "true" },
+    });
 
     this.leftPane = this.createPaneElements(this.spreadEl, "left");
     this.spreadEl.createDiv({ cls: "nb-gutter", attr: { "aria-hidden": "true" } });
@@ -367,33 +388,24 @@ export class NotebookReaderView extends ItemView {
     this.rightRailEl = stageEl.createDiv({ cls: "nb-right-rail" });
 
     // 3. Bottom Action & Placekeeping Bar
-    const bottombar = this.rootEl.createDiv({ cls: "nb-bottombar" });
+    this.bottomBarEl = this.rootEl.createDiv({
+      cls: "nb-bottombar is-nav-right",
+      attr: { "data-nav-position": "right" },
+    });
 
-    const actionGroup = bottombar.createDiv({ cls: "nb-bottom-actions" });
-    this.prevBtn = actionGroup.createEl("button", {
-      cls: "nb-action-btn nb-nav-btn",
-      type: "button",
-      text: "← Prev",
-      attr: { "aria-label": "Previous page" },
-    });
-    this.nextBtn = actionGroup.createEl("button", {
-      cls: "nb-action-btn nb-nav-btn",
-      type: "button",
-      text: "Next →",
-      attr: { "aria-label": "Next page" },
-    });
+    const actionGroup = this.bottomBarEl.createDiv({ cls: "nb-bottom-actions" });
     this.holdLeftBtn = actionGroup.createEl("button", {
-      cls: "nb-action-btn",
+      cls: "nb-action-btn nb-hold-left-btn",
       type: "button",
       text: "Hold left page",
     });
     this.holdRightBtn = actionGroup.createEl("button", {
-      cls: "nb-action-btn",
+      cls: "nb-action-btn nb-hold-right-btn",
       type: "button",
       text: "Hold right page",
     });
     this.consecutiveBtn = actionGroup.createEl("button", {
-      cls: "nb-action-btn",
+      cls: "nb-action-btn nb-consecutive-btn",
       type: "button",
       text: "Consecutive",
       attr: { title: "Return to consecutive-note browsing" },
@@ -411,9 +423,37 @@ export class NotebookReaderView extends ItemView {
       attr: { "aria-pressed": "false", title: "Compare held and current passages side by side" },
     });
 
-    const statusGroup = bottombar.createDiv({ cls: "nb-bottom-status" });
-    this.heldStatusEl = statusGroup.createSpan({ cls: "nb-held-summary" });
+    const statusGroup = this.bottomBarEl.createDiv({ cls: "nb-bottom-status" });
+    this.heldWidgetEl = statusGroup.createDiv({ cls: "nb-held-widget" });
+    this.heldStatusEl = this.heldWidgetEl.createEl("button", {
+      cls: "nb-held-summary nb-held-jump-btn",
+      type: "button",
+    });
+    this.clearHeldBtn = this.heldWidgetEl.createEl("button", {
+      cls: "nb-clear-held-btn",
+      type: "button",
+      text: "✕",
+      attr: {
+        "aria-label": "Clear held page",
+        title: "Clear held page bookmark",
+        hidden: "true",
+      },
+    });
     this.pageCounterEl = statusGroup.createSpan({ cls: "nb-page-counter" });
+
+    this.navGroupEl = this.bottomBarEl.createDiv({ cls: "nb-bottom-nav" });
+    this.prevBtn = this.navGroupEl.createEl("button", {
+      cls: "nb-action-btn nb-nav-btn",
+      type: "button",
+      text: "← Prev",
+      attr: { "aria-label": "Previous page" },
+    });
+    this.nextBtn = this.navGroupEl.createEl("button", {
+      cls: "nb-action-btn nb-nav-btn",
+      type: "button",
+      text: "Next →",
+      attr: { "aria-label": "Next page" },
+    });
 
     this.mountRightRail();
   }
@@ -446,7 +486,7 @@ export class NotebookReaderView extends ItemView {
 
     const scrollEl = paneEl.createDiv({
       cls: "nb-page-scroll",
-      attr: { "data-pane-scroll": side, tabindex: "0" },
+      attr: { "data-pane-scroll": side, "data-ignore-swipe": "true", tabindex: "0" },
     });
     const articleEl = scrollEl.createEl("article", { cls: "nb-page-article" });
     const titleEl = articleEl.createEl("h1", { cls: "nb-page-title" });
@@ -490,6 +530,7 @@ export class NotebookReaderView extends ItemView {
       this.folioIndex = new FolioIndexPanel(this.rightRailEl, {
         onSelectNote: (path) => void this.navigateToNote(path),
         onActivateHeld: () => void this.activateHeldNote(),
+        onClearHeld: () => void this.clearHeldNote(),
         onCloseIndex: () => void this.setIndexOpen(false),
       });
     } else {
@@ -500,6 +541,7 @@ export class NotebookReaderView extends ItemView {
         onSelectFolder: (folderPath) => void this.jumpToFolder(folderPath),
         onStep: (delta) => void this.stepSpread(delta),
         onActivateHeld: () => void this.activateHeldNote(),
+        onClearHeld: () => void this.clearHeldNote(),
       });
     }
   }
@@ -541,6 +583,29 @@ export class NotebookReaderView extends ItemView {
 
     this.registerDomEvent(this.prevBtn, "click", () => void this.stepSpread(-1));
     this.registerDomEvent(this.nextBtn, "click", () => void this.stepSpread(1));
+    this.registerDomEvent(window, "keydown", (e: KeyboardEvent) => {
+      if (this.isClosed || !this.contentEl.isConnected) return;
+      if (e.defaultPrevented) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+
+      const rawTarget = e.target as Node | null;
+      const target =
+        rawTarget instanceof Element ? rawTarget : rawTarget instanceof Node ? rawTarget.parentElement : null;
+      if (
+        target &&
+        (target.closest("input, textarea, select, [contenteditable='true'], [contenteditable='']") ||
+          (target as HTMLElement).isContentEditable)
+      ) {
+        return;
+      }
+      if (document.querySelector(".modal-container, .prompt")) {
+        return;
+      }
+
+      e.preventDefault();
+      void this.stepSpread(e.key === "ArrowLeft" ? -1 : 1);
+    });
     this.registerDomEvent(this.holdLeftBtn, "click", () => void this.holdSide("left"));
     this.registerDomEvent(this.holdRightBtn, "click", () => void this.holdSide("right"));
     this.registerDomEvent(this.leftPane.pinBtn, "click", () => void this.holdSide("left"));
@@ -552,6 +617,22 @@ export class NotebookReaderView extends ItemView {
     this.registerDomEvent(this.consecutiveBtn, "click", () => void this.returnToConsecutive());
     this.registerDomEvent(this.swapBtn, "click", () => void this.swapHeldAndCurrent());
     this.registerDomEvent(this.compareBtn, "click", () => void this.toggleCompare());
+    this.registerDomEvent(this.heldStatusEl, "click", () => void this.activateHeldNote());
+    this.registerDomEvent(this.clearHeldBtn, "click", () => void this.clearHeldNote());
+    this.registerDomEvent(this.heldStatusEl, "mouseover", (e: MouseEvent) => {
+      const related = e.relatedTarget as Node | null;
+      if (related && this.heldStatusEl.contains(related)) return;
+      const notePath = this.heldStatusEl.getAttribute("data-note-path");
+      if (!notePath) return;
+      this.app.workspace.trigger("hover-link", {
+        event: e,
+        source: NOTEBOOK_VIEW_TYPE,
+        hoverParent: this,
+        targetEl: this.heldStatusEl,
+        linktext: notePath,
+        sourcePath: "",
+      });
+    });
 
     // Independent pane scroll capture
     const bindScrollCapture = (side: PaneSide, scrollEl: HTMLElement) => {
@@ -582,9 +663,49 @@ export class NotebookReaderView extends ItemView {
         const sourcePath = desc?.entry.path ?? "";
         void this.handleInternalLinkClick(href, sourcePath);
       });
+
+      this.registerDomEvent(markdownEl, "mouseover", (e: MouseEvent) => {
+        const targetEl = e.target as HTMLElement | null;
+        const link = targetEl?.closest("a.internal-link") as HTMLAnchorElement | null;
+        if (!link) return;
+        const related = e.relatedTarget as Node | null;
+        if (related && link.contains(related)) return;
+        const href = link.getAttribute("data-href") || link.getAttribute("href");
+        if (!href) return;
+        const desc = this.currentDescriptors[side];
+        const sourcePath = desc?.entry.path ?? "";
+        this.app.workspace.trigger("hover-link", {
+          event: e,
+          source: NOTEBOOK_VIEW_TYPE,
+          hoverParent: this,
+          targetEl: link,
+          linktext: href,
+          sourcePath,
+        });
+      });
     };
     bindLinkHandler("left", this.leftPane.markdownEl);
     bindLinkHandler("right", this.rightPane.markdownEl);
+
+    this.registerDomEvent(this.rightRailEl, "mouseover", (e: MouseEvent) => {
+      const targetEl = e.target instanceof Element ? e.target : (e.target as Node | null)?.parentElement ?? null;
+      const hoverTarget = targetEl?.closest(
+        ".nb-folio-item[data-note-path], .nb-edge-held-marker[data-note-path]"
+      ) as HTMLElement | null;
+      if (!hoverTarget) return;
+      const related = e.relatedTarget as Node | null;
+      if (related && hoverTarget.contains(related)) return;
+      const notePath = hoverTarget.getAttribute("data-note-path");
+      if (!notePath) return;
+      this.app.workspace.trigger("hover-link", {
+        event: e,
+        source: NOTEBOOK_VIEW_TYPE,
+        hoverParent: this,
+        targetEl: hoverTarget,
+        linktext: notePath,
+        sourcePath: "",
+      });
+    });
 
     // Deliberate horizontal page-swipe on the spread (strictly separate from vertical reading scroll)
     let swipeStart: { x: number; y: number; time: number; pointerId: number } | null = null;
@@ -615,6 +736,62 @@ export class NotebookReaderView extends ItemView {
     this.registerDomEvent(this.spreadEl, "pointercancel", () => {
       swipeStart = null;
     });
+
+    // Isolate touch gestures inside the reading spread from Obsidian Mobile's workspace pull-down handler
+    const touchStarts = new Map<number, { x: number; y: number }>();
+    const readTouches = (list: TouchList | undefined): Touch[] => {
+      if (!list) return [];
+      const result: Touch[] = [];
+      for (let i = 0; i < list.length; i++) {
+        const touch = typeof list.item === "function" ? list.item(i) : list[i];
+        if (touch) result.push(touch);
+      }
+      return result;
+    };
+    const clearTouchStarts = (e: TouchEvent) => {
+      e.stopPropagation();
+      for (const touch of readTouches(e.changedTouches)) {
+        touchStarts.delete(touch.identifier);
+      }
+    };
+
+    this.registerDomEvent(
+      this.spreadEl,
+      "touchstart",
+      (e: TouchEvent) => {
+        e.stopPropagation();
+        for (const touch of readTouches(e.changedTouches)) {
+          touchStarts.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+        }
+      },
+      { passive: true }
+    );
+    this.registerDomEvent(
+      this.spreadEl,
+      "touchmove",
+      (e: TouchEvent) => {
+        e.stopPropagation();
+        if (!e.cancelable) return;
+        const rawTarget = e.target as Node | null;
+        const targetEl = rawTarget instanceof Element ? rawTarget : rawTarget?.parentElement ?? null;
+        const scrollEl = targetEl?.closest(".nb-page-scroll") as HTMLElement | null;
+        if (!scrollEl || scrollEl.scrollTop > 0) return;
+
+        for (const touch of readTouches(e.changedTouches)) {
+          const start = touchStarts.get(touch.identifier);
+          if (!start) continue;
+          const dx = touch.clientX - start.x;
+          const dy = touch.clientY - start.y;
+          if (dy > 0 && Math.abs(dy) > Math.abs(dx)) {
+            e.preventDefault();
+            break;
+          }
+        }
+      },
+      { passive: false }
+    );
+    this.registerDomEvent(this.spreadEl, "touchend", clearTouchStarts, { passive: true });
+    this.registerDomEvent(this.spreadEl, "touchcancel", clearTouchStarts, { passive: true });
   }
 
   private observeContainerWidth(): void {
@@ -942,6 +1119,14 @@ export class NotebookReaderView extends ItemView {
     await this.host.persistState();
   }
 
+  private async clearHeldNote(): Promise<void> {
+    this.snapshotLiveAnchors();
+    const seq = this.lastSequence ?? this.host.getSequenceResult();
+    this.host.getStateManager().clearHeld(seq.sequence);
+    await this.refresh({ forcePaneRerender: false });
+    await this.host.persistState();
+  }
+
   private async handleInternalLinkClick(href: string, sourcePath: string): Promise<void> {
     const cleanLink = href.split("#")[0].split("|")[0].trim();
     const dest = cleanLink
@@ -1040,12 +1225,30 @@ export class NotebookReaderView extends ItemView {
     this.compareBtn.setAttr("aria-pressed", spread.mode === "compare" ? "true" : "false");
 
     if (spread.heldEntry) {
-      const filterSuffix = spread.isHeldOutsideFilter ? " (Outside current filter)" : "";
-      this.heldStatusEl.setText(`Held: ${spread.heldEntry.title}${filterSuffix}`);
+      const heldIdx = seqResult.sequence.findIndex((e) => e.path === spread.heldEntry?.path);
+      const locationPart = spread.isHeldOutsideFilter
+        ? "Outside current filter"
+        : heldIdx >= 0
+          ? `${spread.heldEntry.sectionLabel} · p. ${heldIdx + 1}`
+          : spread.heldEntry.sectionLabel;
+      const headingPart = spread.heldRef?.anchor.headingText ? ` · § ${spread.heldRef.anchor.headingText}` : "";
+      this.heldStatusEl.setText(`Held: ${spread.heldEntry.title} (${locationPart}${headingPart})`);
+      this.heldStatusEl.disabled = false;
+      this.heldStatusEl.setAttr("data-note-path", spread.heldEntry.path);
+      this.heldStatusEl.setAttr("title", "Click to jump to or compare held page · Clear with ✕");
       this.heldStatusEl.toggleClass("is-outside-filter", spread.isHeldOutsideFilter);
+      this.heldWidgetEl.addClass("has-held");
+      this.clearHeldBtn.removeAttribute("hidden");
+      this.clearHeldBtn.disabled = false;
     } else {
       this.heldStatusEl.setText("No held page");
+      this.heldStatusEl.disabled = true;
+      this.heldStatusEl.removeAttribute("data-note-path");
+      this.heldStatusEl.removeAttribute("title");
       this.heldStatusEl.removeClass("is-outside-filter");
+      this.heldWidgetEl.removeClass("has-held");
+      this.clearHeldBtn.setAttr("hidden", "true");
+      this.clearHeldBtn.disabled = true;
     }
 
     if (seqResult.sequence.length === 0) {
@@ -1059,6 +1262,11 @@ export class NotebookReaderView extends ItemView {
     } else {
       this.pageCounterEl.setText(`– / ${seqResult.sequence.length}`);
     }
+
+    const navPos = state.navButtonPosition;
+    this.bottomBarEl.toggleClass("is-nav-right", navPos === "right");
+    this.bottomBarEl.toggleClass("is-nav-left", navPos === "left");
+    this.bottomBarEl.setAttr("data-nav-position", navPos);
 
     this.applyNarrowSlotVisibility();
   }

@@ -143,6 +143,23 @@ export class Component {
   }
 }
 
+export interface HoverLinkSource {
+  display: string;
+  defaultMod: boolean;
+}
+
+export interface HoverParent {
+  hoverPopover: HoverPopover | null;
+}
+
+export class HoverPopover extends Component {
+  hoverEl!: HTMLElement;
+  constructor(_parent: HoverParent, _targetEl: HTMLElement | null, _waitTime?: number) {
+    super();
+  }
+  hide(): void {}
+}
+
 export abstract class View extends Component {
   app!: App;
   leaf!: WorkspaceLeaf;
@@ -202,6 +219,7 @@ export class Plugin extends Component {
   }
   async saveData(_data: any): Promise<void> {}
   registerView(_type: string, _viewCreator: ViewCreator): void {}
+  registerHoverLinkSource(_source: string, _info: HoverLinkSource): void {}
   addRibbonIcon(_icon: string, _title: string, _callback: (evt: MouseEvent) => any): HTMLElement {
     return document.createElement("div");
   }

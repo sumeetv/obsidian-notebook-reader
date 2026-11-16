@@ -5,6 +5,7 @@ export interface ThumbEdgeCallbacks {
   onSelectFolder: (folderPath: string) => void;
   onStep: (delta: number) => void;
   onActivateHeld: () => void;
+  onClearHeld?: () => void;
 }
 
 export interface ThumbEdgeRenderModel {
@@ -134,6 +135,8 @@ export class ThumbEdgeController {
 
     const onHeldClick = (e: MouseEvent) => {
       e.stopPropagation();
+      const targetEl = e.target instanceof Element ? e.target : (e.target as Node | null)?.parentElement ?? null;
+      if (targetEl?.closest(".nb-edge-held-clear")) return;
       this.callbacks.onActivateHeld();
     };
     const onHeldPointerDown = (e: PointerEvent) => {
@@ -417,20 +420,53 @@ export class ThumbEdgeController {
         const heldFrac = heldIdx >= 0 ? this.indexToFraction(heldIdx, total) : 1;
         this.heldMarkerBtn.style.top =
           heldIdx >= 0 ? `calc(14px + ${heldFrac * 100}% * 0.92)` : "calc(100% - 34px)";
+        this.heldMarkerBtn.setAttr("data-note-path", spread.heldEntry.path);
         this.heldMarkerBtn.empty();
-        this.heldMarkerBtn.createSpan({
+
+        const infoEl = this.heldMarkerBtn.createSpan({ cls: "nb-edge-held-info" });
+        infoEl.createSpan({
           cls: "nb-edge-held-title",
           text: `Held: ${spread.heldEntry.title}`,
         });
-        if (spread.isHeldOutsideFilter) {
-          this.heldMarkerBtn.createSpan({
-            cls: "nb-edge-held-filter-note",
-            text: "Outside filter",
-          });
-        }
+        infoEl.createSpan({
+          cls: "nb-edge-held-meta",
+          text: `${spread.heldEntry.sectionLabel} · ${
+            spread.isHeldOutsideFilter ? "Outside filter" : `p. ${heldIdx + 1}`
+          }`,
+        });
+
+        const clearEl = this.heldMarkerBtn.createSpan({
+          cls: "nb-edge-held-clear",
+          text: "✕",
+          attr: {
+            role: "button",
+            tabindex: "0",
+            "aria-label": "Clear held page",
+            title: "Clear held page",
+          },
+        });
+        clearEl.addEventListener("pointerdown", (e: PointerEvent) => {
+          e.stopPropagation();
+        });
+        clearEl.addEventListener("click", (e: MouseEvent) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.callbacks.onClearHeld?.();
+        });
+        clearEl.addEventListener("keydown", (e: KeyboardEvent) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            e.stopPropagation();
+            this.callbacks.onClearHeld?.();
+          }
+        });
+
         this.heldMarkerBtn.toggleClass("is-outside-filter", spread.isHeldOutsideFilter);
         this.heldMarkerBtn.removeAttribute("hidden");
       } else {
+        this.heldMarkerBtn.empty();
+        this.heldMarkerBtn.removeAttribute("data-note-path");
+        this.heldMarkerBtn.removeClass("is-outside-filter");
         this.heldMarkerBtn.setAttr("hidden", "true");
       }
     }

@@ -65,6 +65,13 @@ var NotebookReaderSettingTab = class extends import_obsidian.PluginSettingTab {
         this.display();
       });
     });
+    new import_obsidian.Setting(containerEl).setName("Page navigation buttons").setDesc("Choose whether Previous and Next page buttons appear on the bottom right or bottom left.").addDropdown((dropdown) => {
+      dropdown.addOption("right", "Bottom right (Default)").addOption("left", "Bottom left (Left-handed)").setValue(state.navButtonPosition).onChange(async (value) => {
+        state.setNavButtonPosition(value === "left" ? "left" : "right");
+        await this.readerPlugin.persistState();
+        await this.readerPlugin.refreshOpenViews();
+      });
+    });
     new import_obsidian.Setting(containerEl).setName("Folder exclusions").setHeading();
     for (const folder of sequence.folders) {
       const disabledByDaily = state.hideDailyNotes && folder.isDailyFolder;
@@ -91,7 +98,8 @@ var NotebookReaderSettingTab = class extends import_obsidian.PluginSettingTab {
           sortOrder: state.sortOrder,
           groupByFolder: state.groupByFolder,
           excludedFolders: [...state.excludedFolders],
-          hideDailyNotes: state.hideDailyNotes
+          hideDailyNotes: state.hideDailyNotes,
+          navButtonPosition: state.navButtonPosition
         };
         state.hydrate(currentSettings);
         await this.readerPlugin.persistState();
@@ -132,6 +140,7 @@ function createDefaultPersistedData() {
     indexOpen: false,
     spreadMode: "consecutive",
     narrowActiveSlot: "left",
+    navButtonPosition: "right",
     current: null,
     held: null,
     positionsByPath: {}
@@ -164,6 +173,7 @@ var NotebookStateManager = class {
     const sortOrder = raw.sortOrder === "date" ? "date" : "alpha";
     const spreadMode = raw.spreadMode === "pinned-left" || raw.spreadMode === "pinned-right" || raw.spreadMode === "compare" ? raw.spreadMode : "consecutive";
     const narrowActiveSlot = raw.narrowActiveSlot === "right" ? "right" : "left";
+    const navButtonPosition = raw.navButtonPosition === "left" ? "left" : "right";
     const excludedFolders = Array.isArray(raw.excludedFolders) ? Array.from(new Set(raw.excludedFolders.filter((v) => typeof v === "string"))) : [];
     const positionsByPath = {};
     if (raw.positionsByPath && typeof raw.positionsByPath === "object") {
@@ -181,6 +191,7 @@ var NotebookStateManager = class {
       indexOpen: typeof raw.indexOpen === "boolean" ? raw.indexOpen : defaults.indexOpen,
       spreadMode,
       narrowActiveSlot,
+      navButtonPosition,
       current: sanitizePassageRef(raw.current),
       held: sanitizePassageRef(raw.held),
       positionsByPath
@@ -195,6 +206,7 @@ var NotebookStateManager = class {
       indexOpen: this.data.indexOpen,
       spreadMode: this.data.spreadMode,
       narrowActiveSlot: this.data.narrowActiveSlot,
+      navButtonPosition: this.data.navButtonPosition,
       current: this.data.current ? { path: this.data.current.path, anchor: cloneAnchor(this.data.current.anchor) } : null,
       held: this.data.held ? { path: this.data.held.path, anchor: cloneAnchor(this.data.held.anchor) } : null,
       positionsByPath: Object.fromEntries(
@@ -222,6 +234,9 @@ var NotebookStateManager = class {
   }
   get narrowActiveSlot() {
     return this.data.narrowActiveSlot;
+  }
+  get navButtonPosition() {
+    return this.data.navButtonPosition;
   }
   get current() {
     return this.data.current;
@@ -260,6 +275,9 @@ var NotebookStateManager = class {
   }
   setNarrowActiveSlot(side) {
     this.data.narrowActiveSlot = side;
+  }
+  setNavButtonPosition(pos) {
+    this.data.navButtonPosition = pos;
   }
   getAnchorForPath(path) {
     if (this.data.current?.path === path) {
@@ -356,14 +374,21 @@ var NotebookStateManager = class {
     const spread = this.getSpread(sequence, allEntriesByPath);
     const targetPane = side === "left" ? spread.left : spread.right;
     if (!targetPane) return;
-    const alreadyPinnedHere = side === "left" && this.data.spreadMode === "pinned-left" || side === "right" && this.data.spreadMode === "pinned-right";
+    const alreadyPinnedHere = side === "left" && (this.data.spreadMode === "pinned-left" || this.data.spreadMode === "compare") || side === "right" && this.data.spreadMode === "pinned-right";
     if (alreadyPinnedHere && this.data.held?.path === targetPane.entry.path) {
       this.data.held = {
         path: targetPane.entry.path,
         anchor: cloneAnchor(targetPane.anchor)
       };
       this.data.positionsByPath[targetPane.entry.path] = cloneAnchor(targetPane.anchor);
+      if (side === "left" && sequence.some((e) => e.path === targetPane.entry.path)) {
+        this.data.current = {
+          path: targetPane.entry.path,
+          anchor: cloneAnchor(targetPane.anchor)
+        };
+      }
       this.data.spreadMode = "consecutive";
+      this.data.narrowActiveSlot = "left";
       return;
     }
     const previousHeld = this.data.held ? { path: this.data.held.path, anchor: cloneAnchor(this.data.held.anchor) } : null;
@@ -458,10 +483,17 @@ var NotebookStateManager = class {
     }
     return true;
   }
-  clearHeld() {
+  clearHeld(sequence) {
+    if ((this.data.spreadMode === "pinned-left" || this.data.spreadMode === "compare") && this.data.held && sequence?.some((e) => e.path === this.data.held?.path)) {
+      this.data.current = {
+        path: this.data.held.path,
+        anchor: cloneAnchor(this.data.held.anchor)
+      };
+    }
     this.data.held = null;
     if (this.data.spreadMode !== "consecutive") {
       this.data.spreadMode = "consecutive";
+      this.data.narrowActiveSlot = "left";
     }
   }
   handleRename(oldPath, newPath) {
@@ -624,7 +656,17 @@ var FolioIndexPanel = class {
       cls: "nb-folio-subtitle",
       text: `${model.spread.totalNotes} ${model.spread.totalNotes === 1 ? "note" : "notes"} in sequence`
     });
-    const closeBtn = header.createEl("button", {
+    const headerActions = header.createDiv({ cls: "nb-folio-header-actions" });
+    if (model.spread.heldEntry) {
+      const clearHeldBtn = headerActions.createEl("button", {
+        cls: "nb-folio-clear-held-btn",
+        type: "button",
+        text: "Clear held",
+        attr: { "aria-label": "Clear held page" }
+      });
+      clearHeldBtn.addEventListener("click", () => this.callbacks.onClearHeld?.());
+    }
+    const closeBtn = headerActions.createEl("button", {
       cls: "nb-folio-close-btn",
       type: "button",
       text: "Close index",
@@ -1118,6 +1160,8 @@ var ThumbEdgeController = class {
     });
     const onHeldClick = (e) => {
       e.stopPropagation();
+      const targetEl = e.target instanceof Element ? e.target : e.target?.parentElement ?? null;
+      if (targetEl?.closest(".nb-edge-held-clear")) return;
       this.callbacks.onActivateHeld();
     };
     const onHeldPointerDown = (e) => {
@@ -1359,20 +1403,48 @@ var ThumbEdgeController = class {
         const heldIdx = sequence.findIndex((e) => e.path === spread.heldEntry?.path);
         const heldFrac = heldIdx >= 0 ? this.indexToFraction(heldIdx, total) : 1;
         this.heldMarkerBtn.style.top = heldIdx >= 0 ? `calc(14px + ${heldFrac * 100}% * 0.92)` : "calc(100% - 34px)";
+        this.heldMarkerBtn.setAttr("data-note-path", spread.heldEntry.path);
         this.heldMarkerBtn.empty();
-        this.heldMarkerBtn.createSpan({
+        const infoEl = this.heldMarkerBtn.createSpan({ cls: "nb-edge-held-info" });
+        infoEl.createSpan({
           cls: "nb-edge-held-title",
           text: `Held: ${spread.heldEntry.title}`
         });
-        if (spread.isHeldOutsideFilter) {
-          this.heldMarkerBtn.createSpan({
-            cls: "nb-edge-held-filter-note",
-            text: "Outside filter"
-          });
-        }
+        infoEl.createSpan({
+          cls: "nb-edge-held-meta",
+          text: `${spread.heldEntry.sectionLabel} \xB7 ${spread.isHeldOutsideFilter ? "Outside filter" : `p. ${heldIdx + 1}`}`
+        });
+        const clearEl = this.heldMarkerBtn.createSpan({
+          cls: "nb-edge-held-clear",
+          text: "\u2715",
+          attr: {
+            role: "button",
+            tabindex: "0",
+            "aria-label": "Clear held page",
+            title: "Clear held page"
+          }
+        });
+        clearEl.addEventListener("pointerdown", (e) => {
+          e.stopPropagation();
+        });
+        clearEl.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.callbacks.onClearHeld?.();
+        });
+        clearEl.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            e.stopPropagation();
+            this.callbacks.onClearHeld?.();
+          }
+        });
         this.heldMarkerBtn.toggleClass("is-outside-filter", spread.isHeldOutsideFilter);
         this.heldMarkerBtn.removeAttribute("hidden");
       } else {
+        this.heldMarkerBtn.empty();
+        this.heldMarkerBtn.removeAttribute("data-note-path");
+        this.heldMarkerBtn.removeClass("is-outside-filter");
         this.heldMarkerBtn.setAttr("hidden", "true");
       }
     }
@@ -1550,6 +1622,7 @@ function restoreScrollAnchor(scrollEl, anchor) {
 var NotebookReaderView = class extends import_obsidian2.ItemView {
   constructor(leaf, host) {
     super(leaf);
+    this.hoverPopover = null;
     this.thumbEdge = null;
     this.folioIndex = null;
     this.folderPopoverOpen = false;
@@ -1603,6 +1676,8 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
     this.isClosed = false;
     this.contentEl.empty();
     this.contentEl.addClass("nb-view-host");
+    this.contentEl.addClass("ignore-swipe");
+    this.contentEl.setAttr("data-ignore-swipe", "true");
     this.buildShell();
     this.bindInteractions();
     this.observeContainerWidth();
@@ -1620,6 +1695,11 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
     this.resizeObserver = null;
     this.unloadPaneComponent("left");
     this.unloadPaneComponent("right");
+    if (this.hoverPopover) {
+      this.hoverPopover.hide?.();
+      this.hoverPopover.unload?.();
+      this.hoverPopover = null;
+    }
     this.thumbEdge?.destroy();
     this.thumbEdge = null;
     this.folioIndex?.destroy();
@@ -1627,7 +1707,10 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
     this.contentEl.empty();
   }
   buildShell() {
-    this.rootEl = this.contentEl.createDiv({ cls: "nb-root" });
+    this.rootEl = this.contentEl.createDiv({
+      cls: "nb-root ignore-swipe",
+      attr: { "data-ignore-swipe": "true" }
+    });
     const topbar = this.rootEl.createDiv({ cls: "nb-topbar" });
     const brandGroup = topbar.createDiv({ cls: "nb-brand-group" });
     const brandIcon = brandGroup.createSpan({ cls: "nb-brand-icon", attr: { "aria-hidden": "true" } });
@@ -1704,37 +1787,31 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
     });
     const stageEl = this.rootEl.createDiv({ cls: "nb-main-stage" });
     const bookFrameEl = stageEl.createDiv({ cls: "nb-book-frame" });
-    this.spreadEl = bookFrameEl.createDiv({ cls: "nb-book-spread" });
+    this.spreadEl = bookFrameEl.createDiv({
+      cls: "nb-book-spread ignore-swipe",
+      attr: { "data-ignore-swipe": "true" }
+    });
     this.leftPane = this.createPaneElements(this.spreadEl, "left");
     this.spreadEl.createDiv({ cls: "nb-gutter", attr: { "aria-hidden": "true" } });
     this.rightPane = this.createPaneElements(this.spreadEl, "right");
     this.rightRailEl = stageEl.createDiv({ cls: "nb-right-rail" });
-    const bottombar = this.rootEl.createDiv({ cls: "nb-bottombar" });
-    const actionGroup = bottombar.createDiv({ cls: "nb-bottom-actions" });
-    this.prevBtn = actionGroup.createEl("button", {
-      cls: "nb-action-btn nb-nav-btn",
-      type: "button",
-      text: "\u2190 Prev",
-      attr: { "aria-label": "Previous page" }
+    this.bottomBarEl = this.rootEl.createDiv({
+      cls: "nb-bottombar is-nav-right",
+      attr: { "data-nav-position": "right" }
     });
-    this.nextBtn = actionGroup.createEl("button", {
-      cls: "nb-action-btn nb-nav-btn",
-      type: "button",
-      text: "Next \u2192",
-      attr: { "aria-label": "Next page" }
-    });
+    const actionGroup = this.bottomBarEl.createDiv({ cls: "nb-bottom-actions" });
     this.holdLeftBtn = actionGroup.createEl("button", {
-      cls: "nb-action-btn",
+      cls: "nb-action-btn nb-hold-left-btn",
       type: "button",
       text: "Hold left page"
     });
     this.holdRightBtn = actionGroup.createEl("button", {
-      cls: "nb-action-btn",
+      cls: "nb-action-btn nb-hold-right-btn",
       type: "button",
       text: "Hold right page"
     });
     this.consecutiveBtn = actionGroup.createEl("button", {
-      cls: "nb-action-btn",
+      cls: "nb-action-btn nb-consecutive-btn",
       type: "button",
       text: "Consecutive",
       attr: { title: "Return to consecutive-note browsing" }
@@ -1751,9 +1828,36 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
       text: "Compare",
       attr: { "aria-pressed": "false", title: "Compare held and current passages side by side" }
     });
-    const statusGroup = bottombar.createDiv({ cls: "nb-bottom-status" });
-    this.heldStatusEl = statusGroup.createSpan({ cls: "nb-held-summary" });
+    const statusGroup = this.bottomBarEl.createDiv({ cls: "nb-bottom-status" });
+    this.heldWidgetEl = statusGroup.createDiv({ cls: "nb-held-widget" });
+    this.heldStatusEl = this.heldWidgetEl.createEl("button", {
+      cls: "nb-held-summary nb-held-jump-btn",
+      type: "button"
+    });
+    this.clearHeldBtn = this.heldWidgetEl.createEl("button", {
+      cls: "nb-clear-held-btn",
+      type: "button",
+      text: "\u2715",
+      attr: {
+        "aria-label": "Clear held page",
+        title: "Clear held page bookmark",
+        hidden: "true"
+      }
+    });
     this.pageCounterEl = statusGroup.createSpan({ cls: "nb-page-counter" });
+    this.navGroupEl = this.bottomBarEl.createDiv({ cls: "nb-bottom-nav" });
+    this.prevBtn = this.navGroupEl.createEl("button", {
+      cls: "nb-action-btn nb-nav-btn",
+      type: "button",
+      text: "\u2190 Prev",
+      attr: { "aria-label": "Previous page" }
+    });
+    this.nextBtn = this.navGroupEl.createEl("button", {
+      cls: "nb-action-btn nb-nav-btn",
+      type: "button",
+      text: "Next \u2192",
+      attr: { "aria-label": "Next page" }
+    });
     this.mountRightRail();
   }
   createPaneElements(parent, side) {
@@ -1781,7 +1885,7 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
     });
     const scrollEl = paneEl.createDiv({
       cls: "nb-page-scroll",
-      attr: { "data-pane-scroll": side, tabindex: "0" }
+      attr: { "data-pane-scroll": side, "data-ignore-swipe": "true", tabindex: "0" }
     });
     const articleEl = scrollEl.createEl("article", { cls: "nb-page-article" });
     const titleEl = articleEl.createEl("h1", { cls: "nb-page-title" });
@@ -1822,6 +1926,7 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
       this.folioIndex = new FolioIndexPanel(this.rightRailEl, {
         onSelectNote: (path) => void this.navigateToNote(path),
         onActivateHeld: () => void this.activateHeldNote(),
+        onClearHeld: () => void this.clearHeldNote(),
         onCloseIndex: () => void this.setIndexOpen(false)
       });
     } else {
@@ -1831,7 +1936,8 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
         onCommitNote: (path) => void this.navigateToNote(path),
         onSelectFolder: (folderPath) => void this.jumpToFolder(folderPath),
         onStep: (delta) => void this.stepSpread(delta),
-        onActivateHeld: () => void this.activateHeldNote()
+        onActivateHeld: () => void this.activateHeldNote(),
+        onClearHeld: () => void this.clearHeldNote()
       });
     }
   }
@@ -1866,6 +1972,22 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
     });
     this.registerDomEvent(this.prevBtn, "click", () => void this.stepSpread(-1));
     this.registerDomEvent(this.nextBtn, "click", () => void this.stepSpread(1));
+    this.registerDomEvent(window, "keydown", (e) => {
+      if (this.isClosed || !this.contentEl.isConnected) return;
+      if (e.defaultPrevented) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      const rawTarget = e.target;
+      const target = rawTarget instanceof Element ? rawTarget : rawTarget instanceof Node ? rawTarget.parentElement : null;
+      if (target && (target.closest("input, textarea, select, [contenteditable='true'], [contenteditable='']") || target.isContentEditable)) {
+        return;
+      }
+      if (document.querySelector(".modal-container, .prompt")) {
+        return;
+      }
+      e.preventDefault();
+      void this.stepSpread(e.key === "ArrowLeft" ? -1 : 1);
+    });
     this.registerDomEvent(this.holdLeftBtn, "click", () => void this.holdSide("left"));
     this.registerDomEvent(this.holdRightBtn, "click", () => void this.holdSide("right"));
     this.registerDomEvent(this.leftPane.pinBtn, "click", () => void this.holdSide("left"));
@@ -1877,6 +1999,22 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
     this.registerDomEvent(this.consecutiveBtn, "click", () => void this.returnToConsecutive());
     this.registerDomEvent(this.swapBtn, "click", () => void this.swapHeldAndCurrent());
     this.registerDomEvent(this.compareBtn, "click", () => void this.toggleCompare());
+    this.registerDomEvent(this.heldStatusEl, "click", () => void this.activateHeldNote());
+    this.registerDomEvent(this.clearHeldBtn, "click", () => void this.clearHeldNote());
+    this.registerDomEvent(this.heldStatusEl, "mouseover", (e) => {
+      const related = e.relatedTarget;
+      if (related && this.heldStatusEl.contains(related)) return;
+      const notePath = this.heldStatusEl.getAttribute("data-note-path");
+      if (!notePath) return;
+      this.app.workspace.trigger("hover-link", {
+        event: e,
+        source: NOTEBOOK_VIEW_TYPE,
+        hoverParent: this,
+        targetEl: this.heldStatusEl,
+        linktext: notePath,
+        sourcePath: ""
+      });
+    });
     const bindScrollCapture = (side, scrollEl) => {
       this.registerDomEvent(scrollEl, "scroll", () => {
         if (Math.abs(scrollEl.scrollTop - this.lastRestoredScrollTop[side]) > 1) {
@@ -1903,9 +2041,47 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
         const sourcePath = desc?.entry.path ?? "";
         void this.handleInternalLinkClick(href, sourcePath);
       });
+      this.registerDomEvent(markdownEl, "mouseover", (e) => {
+        const targetEl = e.target;
+        const link = targetEl?.closest("a.internal-link");
+        if (!link) return;
+        const related = e.relatedTarget;
+        if (related && link.contains(related)) return;
+        const href = link.getAttribute("data-href") || link.getAttribute("href");
+        if (!href) return;
+        const desc = this.currentDescriptors[side];
+        const sourcePath = desc?.entry.path ?? "";
+        this.app.workspace.trigger("hover-link", {
+          event: e,
+          source: NOTEBOOK_VIEW_TYPE,
+          hoverParent: this,
+          targetEl: link,
+          linktext: href,
+          sourcePath
+        });
+      });
     };
     bindLinkHandler("left", this.leftPane.markdownEl);
     bindLinkHandler("right", this.rightPane.markdownEl);
+    this.registerDomEvent(this.rightRailEl, "mouseover", (e) => {
+      const targetEl = e.target instanceof Element ? e.target : e.target?.parentElement ?? null;
+      const hoverTarget = targetEl?.closest(
+        ".nb-folio-item[data-note-path], .nb-edge-held-marker[data-note-path]"
+      );
+      if (!hoverTarget) return;
+      const related = e.relatedTarget;
+      if (related && hoverTarget.contains(related)) return;
+      const notePath = hoverTarget.getAttribute("data-note-path");
+      if (!notePath) return;
+      this.app.workspace.trigger("hover-link", {
+        event: e,
+        source: NOTEBOOK_VIEW_TYPE,
+        hoverParent: this,
+        targetEl: hoverTarget,
+        linktext: notePath,
+        sourcePath: ""
+      });
+    });
     let swipeStart = null;
     this.registerDomEvent(this.spreadEl, "pointerdown", (e) => {
       if (e.pointerType !== "touch") return;
@@ -1933,6 +2109,58 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
     this.registerDomEvent(this.spreadEl, "pointercancel", () => {
       swipeStart = null;
     });
+    const touchStarts = /* @__PURE__ */ new Map();
+    const readTouches = (list) => {
+      if (!list) return [];
+      const result = [];
+      for (let i = 0; i < list.length; i++) {
+        const touch = typeof list.item === "function" ? list.item(i) : list[i];
+        if (touch) result.push(touch);
+      }
+      return result;
+    };
+    const clearTouchStarts = (e) => {
+      e.stopPropagation();
+      for (const touch of readTouches(e.changedTouches)) {
+        touchStarts.delete(touch.identifier);
+      }
+    };
+    this.registerDomEvent(
+      this.spreadEl,
+      "touchstart",
+      (e) => {
+        e.stopPropagation();
+        for (const touch of readTouches(e.changedTouches)) {
+          touchStarts.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+        }
+      },
+      { passive: true }
+    );
+    this.registerDomEvent(
+      this.spreadEl,
+      "touchmove",
+      (e) => {
+        e.stopPropagation();
+        if (!e.cancelable) return;
+        const rawTarget = e.target;
+        const targetEl = rawTarget instanceof Element ? rawTarget : rawTarget?.parentElement ?? null;
+        const scrollEl = targetEl?.closest(".nb-page-scroll");
+        if (!scrollEl || scrollEl.scrollTop > 0) return;
+        for (const touch of readTouches(e.changedTouches)) {
+          const start = touchStarts.get(touch.identifier);
+          if (!start) continue;
+          const dx = touch.clientX - start.x;
+          const dy = touch.clientY - start.y;
+          if (dy > 0 && Math.abs(dy) > Math.abs(dx)) {
+            e.preventDefault();
+            break;
+          }
+        }
+      },
+      { passive: false }
+    );
+    this.registerDomEvent(this.spreadEl, "touchend", clearTouchStarts, { passive: true });
+    this.registerDomEvent(this.spreadEl, "touchcancel", clearTouchStarts, { passive: true });
   }
   observeContainerWidth() {
     const updateWidth = (width) => {
@@ -2213,6 +2441,13 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
     await this.refresh({ forcePaneRerender: false });
     await this.host.persistState();
   }
+  async clearHeldNote() {
+    this.snapshotLiveAnchors();
+    const seq = this.lastSequence ?? this.host.getSequenceResult();
+    this.host.getStateManager().clearHeld(seq.sequence);
+    await this.refresh({ forcePaneRerender: false });
+    await this.host.persistState();
+  }
   async handleInternalLinkClick(href, sourcePath) {
     const cleanLink = href.split("#")[0].split("|")[0].trim();
     const dest = cleanLink ? this.app.metadataCache.getFirstLinkpathDest(cleanLink, sourcePath) : null;
@@ -2287,12 +2522,26 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
     this.compareBtn.toggleClass("is-active", spread.mode === "compare");
     this.compareBtn.setAttr("aria-pressed", spread.mode === "compare" ? "true" : "false");
     if (spread.heldEntry) {
-      const filterSuffix = spread.isHeldOutsideFilter ? " (Outside current filter)" : "";
-      this.heldStatusEl.setText(`Held: ${spread.heldEntry.title}${filterSuffix}`);
+      const heldIdx = seqResult.sequence.findIndex((e) => e.path === spread.heldEntry?.path);
+      const locationPart = spread.isHeldOutsideFilter ? "Outside current filter" : heldIdx >= 0 ? `${spread.heldEntry.sectionLabel} \xB7 p. ${heldIdx + 1}` : spread.heldEntry.sectionLabel;
+      const headingPart = spread.heldRef?.anchor.headingText ? ` \xB7 \xA7 ${spread.heldRef.anchor.headingText}` : "";
+      this.heldStatusEl.setText(`Held: ${spread.heldEntry.title} (${locationPart}${headingPart})`);
+      this.heldStatusEl.disabled = false;
+      this.heldStatusEl.setAttr("data-note-path", spread.heldEntry.path);
+      this.heldStatusEl.setAttr("title", "Click to jump to or compare held page \xB7 Clear with \u2715");
       this.heldStatusEl.toggleClass("is-outside-filter", spread.isHeldOutsideFilter);
+      this.heldWidgetEl.addClass("has-held");
+      this.clearHeldBtn.removeAttribute("hidden");
+      this.clearHeldBtn.disabled = false;
     } else {
       this.heldStatusEl.setText("No held page");
+      this.heldStatusEl.disabled = true;
+      this.heldStatusEl.removeAttribute("data-note-path");
+      this.heldStatusEl.removeAttribute("title");
       this.heldStatusEl.removeClass("is-outside-filter");
+      this.heldWidgetEl.removeClass("has-held");
+      this.clearHeldBtn.setAttr("hidden", "true");
+      this.clearHeldBtn.disabled = true;
     }
     if (seqResult.sequence.length === 0) {
       this.pageCounterEl.setText("0 / 0");
@@ -2305,6 +2554,10 @@ var NotebookReaderView = class extends import_obsidian2.ItemView {
     } else {
       this.pageCounterEl.setText(`\u2013 / ${seqResult.sequence.length}`);
     }
+    const navPos = state.navButtonPosition;
+    this.bottomBarEl.toggleClass("is-nav-right", navPos === "right");
+    this.bottomBarEl.toggleClass("is-nav-left", navPos === "left");
+    this.bottomBarEl.setAttr("data-nav-position", navPos);
     this.applyNarrowSlotVisibility();
   }
   unloadPaneComponent(side) {
@@ -2482,6 +2735,10 @@ var NotebookReaderPlugin = class extends import_obsidian3.Plugin {
         getSequenceResult: () => this.getSequenceResult()
       })
     );
+    this.registerHoverLinkSource(NOTEBOOK_VIEW_TYPE, {
+      display: "Notebook Reader",
+      defaultMod: true
+    });
     this.addRibbonIcon("book-open", "Open Notebook Reader", () => {
       void this.activateView();
     });
@@ -2511,6 +2768,15 @@ var NotebookReaderPlugin = class extends import_obsidian3.Plugin {
           await this.persistState();
           await this.refreshOpenViews();
         }
+      }
+    });
+    this.addCommand({
+      id: "clear-notebook-held-page",
+      name: "Clear held reading place",
+      callback: async () => {
+        this.stateManager.clearHeld(this.getSequenceResult().sequence);
+        await this.persistState();
+        await this.refreshOpenViews();
       }
     });
     this.addSettingTab(new NotebookReaderSettingTab(this.app, this));

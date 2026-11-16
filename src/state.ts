@@ -1,4 +1,5 @@
 import type {
+  NavButtonPosition,
   NotebookPersistedData,
   NoteEntry,
   PaneDescriptor,
@@ -51,6 +52,7 @@ export function createDefaultPersistedData(): NotebookPersistedData {
     indexOpen: false,
     spreadMode: "consecutive",
     narrowActiveSlot: "left",
+    navButtonPosition: "right",
     current: null,
     held: null,
     positionsByPath: {},
@@ -94,6 +96,7 @@ export class NotebookStateManager {
         ? raw.spreadMode
         : "consecutive";
     const narrowActiveSlot: PaneSide = raw.narrowActiveSlot === "right" ? "right" : "left";
+    const navButtonPosition: NavButtonPosition = raw.navButtonPosition === "left" ? "left" : "right";
 
     const excludedFolders = Array.isArray(raw.excludedFolders)
       ? Array.from(new Set(raw.excludedFolders.filter((v): v is string => typeof v === "string")))
@@ -117,6 +120,7 @@ export class NotebookStateManager {
       indexOpen: typeof raw.indexOpen === "boolean" ? raw.indexOpen : defaults.indexOpen,
       spreadMode,
       narrowActiveSlot,
+      navButtonPosition,
       current: sanitizePassageRef(raw.current),
       held: sanitizePassageRef(raw.held),
       positionsByPath,
@@ -132,6 +136,7 @@ export class NotebookStateManager {
       indexOpen: this.data.indexOpen,
       spreadMode: this.data.spreadMode,
       narrowActiveSlot: this.data.narrowActiveSlot,
+      navButtonPosition: this.data.navButtonPosition,
       current: this.data.current
         ? { path: this.data.current.path, anchor: cloneAnchor(this.data.current.anchor) }
         : null,
@@ -170,6 +175,10 @@ export class NotebookStateManager {
 
   get narrowActiveSlot(): PaneSide {
     return this.data.narrowActiveSlot;
+  }
+
+  get navButtonPosition(): NavButtonPosition {
+    return this.data.navButtonPosition;
   }
 
   get current(): PassageRef | null {
@@ -219,6 +228,10 @@ export class NotebookStateManager {
 
   setNarrowActiveSlot(side: PaneSide): void {
     this.data.narrowActiveSlot = side;
+  }
+
+  setNavButtonPosition(pos: NavButtonPosition): void {
+    this.data.navButtonPosition = pos;
   }
 
   getAnchorForPath(path: string): PassageAnchor {
@@ -350,7 +363,8 @@ export class NotebookStateManager {
     if (!targetPane) return;
 
     const alreadyPinnedHere =
-      (side === "left" && this.data.spreadMode === "pinned-left") ||
+      (side === "left" &&
+        (this.data.spreadMode === "pinned-left" || this.data.spreadMode === "compare")) ||
       (side === "right" && this.data.spreadMode === "pinned-right");
 
     if (alreadyPinnedHere && this.data.held?.path === targetPane.entry.path) {
@@ -359,7 +373,14 @@ export class NotebookStateManager {
         anchor: cloneAnchor(targetPane.anchor),
       };
       this.data.positionsByPath[targetPane.entry.path] = cloneAnchor(targetPane.anchor);
+      if (side === "left" && sequence.some((e) => e.path === targetPane.entry.path)) {
+        this.data.current = {
+          path: targetPane.entry.path,
+          anchor: cloneAnchor(targetPane.anchor),
+        };
+      }
       this.data.spreadMode = "consecutive";
+      this.data.narrowActiveSlot = "left";
       return;
     }
 
@@ -478,10 +499,21 @@ export class NotebookStateManager {
     return true;
   }
 
-  clearHeld(): void {
+  clearHeld(sequence?: readonly NoteEntry[]): void {
+    if (
+      (this.data.spreadMode === "pinned-left" || this.data.spreadMode === "compare") &&
+      this.data.held &&
+      sequence?.some((e) => e.path === this.data.held?.path)
+    ) {
+      this.data.current = {
+        path: this.data.held.path,
+        anchor: cloneAnchor(this.data.held.anchor),
+      };
+    }
     this.data.held = null;
     if (this.data.spreadMode !== "consecutive") {
       this.data.spreadMode = "consecutive";
+      this.data.narrowActiveSlot = "left";
     }
   }
 

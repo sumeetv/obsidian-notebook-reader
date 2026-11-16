@@ -195,4 +195,96 @@ describe("NotebookStateManager", () => {
     expect(state.held).toBeNull();
     expect(state.spreadMode).toBe("consecutive");
   });
+
+  it("keeps the left page as current when unpinning the left page or clearing held", () => {
+    const seq = setupSequence(true);
+    const state = new NotebookStateManager();
+    state.reconcile(seq.sequence, seq.allEntriesByPath);
+
+    state.recordScrollAnchor("Ideas/A.md", "current", {
+      scrollTop: 240,
+      scrollRatio: 0.4,
+      blockIndex: 3,
+      blockOffsetRatio: 0.2,
+    });
+
+    // Pin left page on [Ideas/A.md, Ideas/B.md], then unpin it -> keeps [Ideas/A.md, Ideas/B.md]
+    state.holdVisibleSide("left", seq.sequence, seq.allEntriesByPath);
+    expect(state.spreadMode).toBe("pinned-left");
+    expect(state.narrowActiveSlot).toBe("right");
+
+    state.holdVisibleSide("left", seq.sequence, seq.allEntriesByPath);
+    let spread = state.getSpread(seq.sequence, seq.allEntriesByPath);
+    expect(spread.mode).toBe("consecutive");
+    expect(state.narrowActiveSlot).toBe("left");
+    expect(spread.left?.entry.path).toBe("Ideas/A.md");
+    expect(spread.left?.anchor.scrollTop).toBe(240);
+    expect(spread.right?.entry.path).toBe("Ideas/B.md");
+
+    // Pin left, browse right away to Ideas/C.md, then clearHeld(seq.sequence) -> restores Ideas/A.md
+    state.holdVisibleSide("left", seq.sequence, seq.allEntriesByPath);
+    state.step(1, seq.sequence);
+    expect(state.getSpread(seq.sequence, seq.allEntriesByPath).right?.entry.path).toBe("Ideas/C.md");
+
+    state.clearHeld(seq.sequence);
+    spread = state.getSpread(seq.sequence, seq.allEntriesByPath);
+    expect(spread.mode).toBe("consecutive");
+    expect(state.narrowActiveSlot).toBe("left");
+    expect(state.held).toBeNull();
+    expect(spread.left?.entry.path).toBe("Ideas/A.md");
+    expect(spread.left?.anchor.scrollTop).toBe(240);
+    expect(spread.right?.entry.path).toBe("Ideas/B.md");
+
+    // In compare mode (left = Ideas/A.md, right = Reading/G.md), unpinning left via holdVisibleSide
+    // and clearing held via clearHeld both preserve Ideas/A.md as current
+    state.recordScrollAnchor("Ideas/A.md", "current", {
+      scrollTop: 310,
+      scrollRatio: 0.5,
+      blockIndex: 4,
+      blockOffsetRatio: 0.1,
+    });
+    state.holdVisibleSide("left", seq.sequence, seq.allEntriesByPath);
+    state.navigateToNote("Reading/G.md", seq.sequence);
+    state.returnToConsecutive(seq.sequence);
+    state.toggleCompare(seq.sequence, seq.allEntriesByPath);
+    expect(state.spreadMode).toBe("compare");
+
+    state.holdVisibleSide("left", seq.sequence, seq.allEntriesByPath);
+    spread = state.getSpread(seq.sequence, seq.allEntriesByPath);
+    expect(spread.mode).toBe("consecutive");
+    expect(state.narrowActiveSlot).toBe("left");
+    expect(spread.left?.entry.path).toBe("Ideas/A.md");
+    expect(spread.left?.anchor.scrollTop).toBe(310);
+    expect(spread.right?.entry.path).toBe("Ideas/B.md");
+
+    state.navigateToNote("Reading/G.md", seq.sequence);
+    state.toggleCompare(seq.sequence, seq.allEntriesByPath);
+    expect(state.spreadMode).toBe("compare");
+
+    state.clearHeld(seq.sequence);
+    spread = state.getSpread(seq.sequence, seq.allEntriesByPath);
+    expect(spread.mode).toBe("consecutive");
+    expect(state.narrowActiveSlot).toBe("left");
+    expect(state.held).toBeNull();
+    expect(spread.left?.entry.path).toBe("Ideas/A.md");
+    expect(spread.left?.anchor.scrollTop).toBe(310);
+    expect(spread.right?.entry.path).toBe("Ideas/B.md");
+
+    // If the held note is outside the filtered sequence, clearHeld keeps the in-sequence current note
+    const seqAll = setupSequence(false);
+    const filteredState = new NotebookStateManager({ hideDailyNotes: false });
+    filteredState.reconcile(seqAll.sequence, seqAll.allEntriesByPath);
+    filteredState.navigateToNote("Journal/2026-11-10.md", seqAll.sequence);
+    filteredState.holdVisibleSide("left", seqAll.sequence, seqAll.allEntriesByPath);
+    filteredState.setHideDailyNotes(true);
+    const seqFiltered = setupSequence(true);
+    filteredState.reconcile(seqFiltered.sequence, seqFiltered.allEntriesByPath);
+
+    filteredState.clearHeld(seqFiltered.sequence);
+    const filteredSpread = filteredState.getSpread(seqFiltered.sequence, seqFiltered.allEntriesByPath);
+    expect(filteredSpread.mode).toBe("consecutive");
+    expect(filteredState.narrowActiveSlot).toBe("left");
+    expect(filteredState.held).toBeNull();
+    expect(filteredSpread.left?.entry.path).toBe("Reading/G.md");
+  });
 });
